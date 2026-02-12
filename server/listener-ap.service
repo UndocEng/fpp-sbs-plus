@@ -1,0 +1,12 @@
+[Unit]
+Description=Listener Sync WiFi AP
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/fpp/fpp-listener-sync/server/listener-ap.sh
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Listen</title>
+  <style>
+    :root{
+      --bg:#0f1115;
+      --card:#171a21;
+      --ink:#e9eef7;
+      --muted:#9aa6b2;
+      --accent:#00e5ff;
+      --bad:#ff4d4d;
+      --ok:#4dff88;
+    }
+    body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; background:var(--bg); color:var(--ink); }
+    .wrap{ max-width:720px; margin:0 auto; padding:18px; }
+    .header{ text-align:center; margin:10px 0 18px; }
+    .logo{
+      width:86px; height:86px; border-radius:18px;
+      background:linear-gradient(145deg, rgba(0,229,255,.22), rgba(0,229,255,.04));
+      display:inline-flex; align-items:center; justify-content:center;
+      border:1px solid rgba(0,229,255,.28);
+      box-shadow:0 8px 28px rgba(0,0,0,.35);
+    }
+    .logo svg{ width:54px; height:54px; fill:var(--accent); opacity:.95; }
+    h1{ margin:12px 0 6px; font-size:34px; letter-spacing:.3px; color:var(--accent); }
+    .sub{ margin:0; color:var(--muted); font-size:14px; }
+    .card{
+      background:var(--card); border:1px solid rgba(255,255,255,.06);
+      border-radius:16px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.35);
+    }
+    button{
+      width:100%; font-size:20px; padding:14px 16px; border-radius:14px;
+      border:2px solid var(--accent); background:#11141a; color:var(--ink);
+      cursor:pointer;
+    }
+    button:active{ transform:scale(.99); }
+    .row{ display:flex; gap:10px; margin-top:12px; }
+    .row button{ width:50%; font-size:16px; padding:12px; border-radius:12px; }
+    .pill{
+      display:inline-flex; gap:8px; align-items:center;
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:999px; padding:8px 12px; color:var(--muted); font-size:13px;
+      background:rgba(0,0,0,.18);
+    }
+    .dot{ width:10px; height:10px; border-radius:50%; background:#666; }
+    .dot.ok{ background:var(--ok); }
+    .dot.bad{ background:var(--bad); }
+    .grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px; }
+    .kv{ background:rgba(0,0,0,.14); border:1px solid rgba(255,255,255,.06); border-radius:12px; padding:10px 12px; }
+    .k{ font-size:12px; color:var(--muted); }
+    .v{ margin-top:4px; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .small{ margin-top:12px; font-size:12px; color:var(--muted); line-height:1.4; }
+    .footer{ margin-top:14px; text-align:center; font-size:12px; color:var(--muted); opacity:.85; }
+    audio{ width:100%; margin-top:12px; }
+    .warn{ margin-top:10px; font-size:12px; color:var(--muted); }
+    code{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24">
+        <path d="M12 3a9 9 0 0 0-9 9v3a3 3 0 0 0 3 3h1v2h2v-2h6v2h2v-2h1a3 3 0 0 0 3-3v-3a9 9 0 0 0-9-9Zm7 12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-3a7 7 0 0 1 14 0v3Z"/>
+      </svg>
+    </div>
+    <h1>Listen</h1>
+    <p class="sub">Synced show audio on your phone</p>
+  </div>
+
+  <div class="card">
+    <span class="pill"><span id="dot" class="dot"></span><span id="state">Idle</span></span>
+
+    <div style="margin-top:12px;">
+      <button id="enable">Enable Audio</button>
+      <div class="row">
+        <button id="mute">Mute</button>
+        <button id="resync">Resync</button>
+      </div>
+    </div>
+
+    <audio id="player" controls preload="auto" playsinline></audio>
+
+    <div class="grid">
+      <div class="kv"><div class="k">Track</div><div class="v" id="track">—</div></div>
+      <div class="kv"><div class="k">Error</div><div class="v" id="err">—</div></div>
+      <div class="kv"><div class="k">Rate</div><div class="v" id="rate">—</div></div>
+      <div class="kv"><div class="k">Poll</div><div class="v" id="poll">—</div></div>
+    </div>
+
+    <div class="small">
+      If audio is silent on iPhone, check the ringer switch and volume.
+      You may need to stay on this page (some phones pause background audio).
+    </div>
+
+    <div class="footer" id="ver">Version: (loading…)</div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ====== Config (Simple_Sync flavor) ======
+  const STATUS_URL = "./status.php";
+  const POLL_MS = 250;              // 4Hz
+  const RATE_MIN = 0.997;
+  const RATE_MAX = 1.003;
+  const SOFT_ERR_S = 0.35;          // start nudging
+  const HARD_SEEK_S = 1.00;         // only hard seek when way off
+  const STALE_MS = 3000;            // if server stops responding, show error
+  const AUDIO_BASE = "../music.php?file="; // proxy endpoint (keeps paths stable)
+
+  // ====== UI ======
+  const dot = document.getElementById("dot");
+  const stateEl = document.getElementById("state");
+  const trackEl = document.getElementById("track");
+  const errEl = document.getElementById("err");
+  const rateEl = document.getElementById("rate");
+  const pollEl = document.getElementById("poll");
+  const verEl = document.getElementById("ver");
+
+  const enableBtn = document.getElementById("enable");
+  const muteBtn = document.getElementById("mute");
+  const resyncBtn = document.getElementById("resync");
+  const audio = document.getElementById("player");
+
+  let enabled = false;
+  let muted = false;
+
+  // ====== Sync state ======
+  let last = null; // last status packet
+  let lastRecvMs = 0;
+  let currentTrack = null;
+  let pollTimer = null;
+
+  const nowMs = () => performance.now();
+
+  function setDot(mode){
+    dot.classList.remove("ok","bad");
+    if(mode==="ok") dot.classList.add("ok");
+    if(mode==="bad") dot.classList.add("bad");
+  }
+
+  function setState(text, ok){
+    stateEl.textContent = text;
+    setDot(ok ? "ok" : (ok===false ? "bad" : ""));
+  }
+
+  function clamp(x,a,b){ return Math.max(a, Math.min(b,x)); }
+
+  async function fetchJSON(url){
+    const r = await fetch(url, { cache: "no-store" });
+    if(!r.ok) throw new Error("HTTP " + r.status);
+    return await r.json();
+  }
+
+  function desiredSecondsFromPacket(pkt){
+    // pkt.pos_ms is the position at pkt.server_ms
+    const ageMs = (Date.now() - pkt.wall_ms);
+    // Blend: prefer server_ms monotonic-ish, but wall clock helps with client delay.
+    // pkt.server_ms is monotonic on server, pkt.wall_ms is epoch ms on server.
+    // We compute desired position using wall clock age since packet creation.
+    const desiredMs = pkt.pos_ms + clamp(ageMs, 0, 1500);
+    return desiredMs / 1000;
+  }
+
+  function ensureAudioSrc(trackBase){
+    // Use a PHP proxy so browser origin stays consistent and we can enforce allowlists.
+    // trackBase already includes extension (e.g. MySong.mp3)
+    const src = AUDIO_BASE + encodeURIComponent(trackBase);
+    if(audio.src !== new URL(src, location.href).href){
+      audio.src = src;
+      audio.load();
+    }
+  }
+
+  function hardResync(pkt){
+    const desired = desiredSecondsFromPacket(pkt);
+    if(isFinite(audio.duration) && audio.duration > 0){
+      audio.currentTime = clamp(desired, 0, Math.max(0, audio.duration - 0.05));
+    }
+  }
+
+  function servo(pkt){
+    if(!enabled) return;
+
+    // keep mute state
+    audio.muted = muted;
+
+    // load track if needed
+    if(pkt.track && pkt.track !== currentTrack){
+      currentTrack = pkt.track;
+      trackEl.textContent = currentTrack;
+      ensureAudioSrc(currentTrack);
+      // on track change, wait for metadata then hard align once
+      const onMeta = () => {
+        audio.removeEventListener("loadedmetadata", onMeta);
+        hardResync(pkt);
+        if(pkt.playing) audio.play().catch(()=>{});
+      };
+      audio.addEventListener("loadedmetadata", onMeta);
+    } else if(pkt.track) {
+      trackEl.textContent = pkt.track;
+    }
+
+    // play/pause follow
+    if(pkt.playing){
+      if(audio.paused) audio.play().catch(()=>{});
+    }else{
+      if(!audio.paused) audio.pause();
+    }
+
+    // servo if we have duration/metadata
+    if(!(isFinite(audio.duration) && audio.duration > 0)) return;
+
+    const desired = desiredSecondsFromPacket(pkt);
+    const err = desired - audio.currentTime;
+
+    // UI
+    errEl.textContent = (err>=0?"+":"") + err.toFixed(3) + "s";
+    rateEl.textContent = audio.playbackRate.toFixed(5) + "x";
+
+    const absErr = Math.abs(err);
+
+    if(absErr >= HARD_SEEK_S){
+      audio.playbackRate = 1.0;
+      audio.currentTime = clamp(desired, 0, Math.max(0, audio.duration - 0.05));
+      return;
+    }
+
+    if(absErr < SOFT_ERR_S){
+      audio.playbackRate = 1.0;
+      return;
+    }
+
+    // Gentle nudging, clamped ~0.997–1.003
+    // Scale: 0.003x at ~1s would be too much; we keep subtle.
+    const k = 0.003; // maximum adjustment range
+    const adj = clamp(err * 0.0025, -k, k); // proportional
+    audio.playbackRate = clamp(1.0 + adj, RATE_MIN, RATE_MAX);
+  }
+
+  async function tick(){
+    try{
+      const t0 = nowMs();
+      const pkt = await fetchJSON(STATUS_URL);
+      const t1 = nowMs();
+      pollEl.textContent = Math.round(t1 - t0) + "ms";
+
+      last = pkt;
+      lastRecvMs = nowMs();
+
+      if(pkt.ok){
+        if(pkt.playing) setState("Playing", true);
+        else setState("Idle", true);
+
+        if(!enabled){
+          // show track but don't auto-play until user taps
+          if(pkt.track) trackEl.textContent = pkt.track;
+        } else {
+          servo(pkt);
+        }
+      } else {
+        setState("No show", false);
+      }
+    }catch(e){
+      setState("Disconnected", false);
+    }
+  }
+
+  function startPolling(){
+    if(pollTimer) return;
+    pollTimer = setInterval(() => {
+      tick();
+      // stale detection
+      if(enabled && lastRecvMs && (nowMs() - lastRecvMs) > STALE_MS){
+        setState("Stale", false);
+      }
+    }, POLL_MS);
+    tick();
+  }
+
+  // ====== UI events ======
+  enableBtn.addEventListener("click", async () => {
+    enabled = true;
+    setState("Enabled", true);
+    // prime audio pipeline (iOS gesture requirement)
+    try{
+      await audio.play();
+      audio.pause();
+    }catch(_){}
+    if(last && last.ok){
+      currentTrack = null; // force src set
+      servo(last);
+    }
+    startPolling();
+  });
+
+  muteBtn.addEventListener("click", () => {
+    muted = !muted;
+    muteBtn.textContent = muted ? "Unmute" : "Mute";
+    audio.muted = muted;
+  });
+
+  resyncBtn.addEventListener("click", () => {
+    if(last) hardResync(last);
+  });
+
+  // fetch version (optional)
+  fetch("../version.php").then(r=>r.text()).then(t=>{
+    verEl.textContent = "Version: " + (t || "").trim();
+  }).catch(()=>{ verEl.textContent = "Version: unknown"; });
+
+  startPolling();
+})();
+</script>
+</body>
+</html>

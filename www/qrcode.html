@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>QR Code</title>
+<style>
+body{ font-family:system-ui,sans-serif; background:#111; color:#eee; padding:18px; }
+input,button{ font-size:16px; padding:10px 12px; width:100%; box-sizing:border-box; margin:6px 0; }
+canvas{ background:#fff; border-radius:12px; padding:10px; }
+.small{ color:#aaa; font-size:13px; }
+</style>
+</head>
+<body>
+<h2>Wi‑Fi + Listen QR</h2>
+<div class="small">Fill these in and generate a QR code you can print.</div>
+
+<label>SSID</label>
+<input id="ssid" value="SHOW_AUDIO"/>
+
+<label>Password (leave blank for open)</label>
+<input id="pass" value=""/>
+
+<label>Listen URL</label>
+<input id="url" value="http://192.168.50.1/listen/"/>
+
+<button id="go">Generate</button>
+
+<div style="margin-top:12px;">
+  <canvas id="c" width="320" height="320"></canvas>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script>
+document.getElementById('go').onclick = () => {
+  const ssid = document.getElementById('ssid').value.trim();
+  const pass = document.getElementById('pass').value;
+  const url  = document.getElementById('url').value.trim();
+
+  const wifi = pass ? `WIFI:T:WPA;S:${ssid};P:${pass};;` : `WIFI:T:nopass;S:${ssid};;`;
+  const payload = wifi + "\n" + url;
+
+  const qr = qrcode(0,'M');
+  qr.addData(payload);
+  qr.make();
+
+  const c = document.getElementById('c');
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0,0,c.width,c.height);
+
+  const cell = c.width / qr.getModuleCount();
+  for(let r=0;r<qr.getModuleCount();r++){
+    for(let col=0;col<qr.getModuleCount();col++){
+      ctx.fillStyle = qr.isDark(r,col) ? "#000" : "#fff";
+      ctx.fillRect(col*cell, r*cell, cell, cell);
+    }
+  }
+};
+</script>
+</body>
+</html>
