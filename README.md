@@ -26,8 +26,8 @@ This is a **DIY** “listen on your phone” sync system for Falcon Player (FPP)
 ## Install (on an FPP Pi)
 ```bash
 cd /home/fpp
-git clone https://github.com/YOUR_ACCOUNT/YOUR_REPO.git fpp-listener-sync
-cd fpp-listener-sync
+git clone https://github.com/YOUR_ACCOUNT/ChatGPT-fll0listen.git
+cd ChatGPT-fll0listen
 sudo ./install.sh
 ```
 
@@ -37,7 +37,7 @@ Then open:
 
 ## Uninstall
 ```bash
-cd /home/fpp/fpp-listener-sync
+cd /home/fpp/ChatGPT-fll0listen
 sudo ./uninstall.sh
 ```
 

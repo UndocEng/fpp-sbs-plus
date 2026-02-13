@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/home/fpp/fpp-listener-sync/server/listener-ap.sh
+ExecStart=/home/fpp/ChatGPT-fll0listen/server/listener-ap.sh
 Restart=on-failure
 RestartSec=3
 
