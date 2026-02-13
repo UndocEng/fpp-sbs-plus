@@ -1,0 +1,20 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "FPP: Reload Apache",
+      "type": "shell",
+      "command": "ssh fpp \"sudo systemctl reload apache2\""
+    },
+    {
+      "label": "FPP: Tail Apache error log",
+      "type": "shell",
+      "command": "ssh fpp \"tail -n 120 /home/fpp/media/logs/apache2-error.log\""
+    },
+    {
+      "label": "FPP: Deploy Listen Page",
+      "type": "shell",
+      "command": "scp -r www/listen/* fpp:/opt/fpp/www/listen/ && scp www/music.php www/version.php www/qrcode.html fpp:/opt/fpp/www/ && ssh fpp \"sudo systemctl reload apache2\""
+    }
+  ]
+}
