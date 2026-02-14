@@ -1,12 +1,12 @@
 [Unit]
-Description=Listener Sync WiFi AP
+Description=Listener Wi-Fi Access Point
 After=network.target
 
 [Service]
-Type=simple
-ExecStart=/home/fpp/ChatGPT-fll0listen/server/listener-ap.sh
-Restart=on-failure
-RestartSec=3
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/home/fpp/ChatGPT-fpp-listen/server/listener-ap.sh
+ExecStop=/bin/bash -c 'pkill -f hostapd-listener.conf || true; pkill -f listener-dnsmasq.conf || true'
 
 [Install]
 WantedBy=multi-user.target

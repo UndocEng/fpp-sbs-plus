@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # listener-ap.sh
-# Optional: brings up an open AP and captive portal-like redirect to /listen/
-# This is a starting point — adjust wlan device, channel, and IPs to your environment.
+# Brings up a WPA2-protected AP and captive portal-like redirect to /listen/
+# Adjust wlan device, channel, and IPs to your environment.
 
 set -euo pipefail
 
@@ -9,7 +9,6 @@ WLAN_IF="${WLAN_IF:-wlan1}"
 SSID="${SSID:-SHOW_AUDIO}"
 CHANNEL="${CHANNEL:-6}"
 AP_IP="${AP_IP:-192.168.50.1}"
-AP_NET="${AP_NET:-192.168.50.0}"
 AP_MASK="${AP_MASK:-24}"
 
 echo "[listener-ap] Using interface: $WLAN_IF"
@@ -19,18 +18,36 @@ sudo ip addr flush dev "$WLAN_IF" || true
 sudo ip addr add "$AP_IP/$AP_MASK" dev "$WLAN_IF"
 sudo ip link set "$WLAN_IF" up
 
-# hostapd config
-HOSTAPD_CONF="/tmp/listener-hostapd.conf"
-cat > "$HOSTAPD_CONF" <<EOF
+# Use persistent hostapd config (password changeable via web UI)
+HOSTAPD_CONF="/home/fpp/listen-sync/hostapd-listener.conf"
+
+# Create default config if missing
+if [[ ! -f "$HOSTAPD_CONF" ]]; then
+  echo "[listener-ap] Creating default hostapd config"
+  sudo mkdir -p /home/fpp/listen-sync
+  sudo tee "$HOSTAPD_CONF" > /dev/null <<EOF
 interface=$WLAN_IF
 driver=nl80211
 ssid=$SSID
 hw_mode=g
 channel=$CHANNEL
+country_code=US
 wmm_enabled=1
+ieee80211n=1
 auth_algs=1
 ignore_broadcast_ssid=0
+ap_isolate=1
+
+# WPA2 configuration
+wpa=2
+wpa_passphrase=Listen123
+wpa_key_mgmt=WPA-PSK
+wpa_pairwise=CCMP
+rsn_pairwise=CCMP
 EOF
+  sudo chmod 644 "$HOSTAPD_CONF"
+  echo "[listener-ap] Default password: Listen123"
+fi
 
 # dnsmasq config
 DNSMASQ_CONF="/tmp/listener-dnsmasq.conf"
@@ -51,5 +68,5 @@ echo "[listener-ap] Starting hostapd..."
 sudo pkill hostapd || true
 sudo hostapd "$HOSTAPD_CONF" -B
 
-echo "[listener-ap] AP up. Clients should be redirected by DNS to $AP_IP."
-echo "[listener-ap] Make sure your Apache is listening on $AP_IP and /listen/ exists."
+echo "[listener-ap] AP up (SSID: $SSID, WPA2)."
+echo "[listener-ap] Default password: Listen123 (change via web UI)"

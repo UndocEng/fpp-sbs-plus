@@ -1,51 +1,274 @@
-# FPP Listener Sync (Simple_Sync flavor, production bundle)
+# ChatGPT FPP Listener
 
-This is a **DIY** “listen on your phone” sync system for Falcon Player (FPP).
+A **show-owner developer tool** for Falcon Player (FPP). Lets visitors listen to your show audio on their phones, synced to your light show. Gives the show owner full control: start/stop sequences and playlists, manage the WiFi access point, all from one page.
 
-**Design goal:** visitors open a webpage, their phone downloads the show audio file, and the page keeps playback synced to whatever FPP is currently playing.
+---
 
-## Key behaviors (matching the Simple_Sync flavor)
-- Phone downloads full MP3 (or other supported format) and plays locally
-- Client polls `status.php` at **4 Hz** (250ms)
-- Server returns:
-  - current track base name
-  - current position (ms)
-  - server timestamp (ms)
-  - playing state
-- Client smooths between FPP’s coarse time updates using the server timestamp
-- Gentle playbackRate nudging (default clamp **0.997x–1.003x**)
-- Hard seek only when error exceeds **1 second**
-- iOS-friendly “Enable Audio” button (user gesture required)
+## What This Does
 
-## Assumptions
-- Your `.fseq` and audio file share the same base name, e.g.
-  - `MySong.fseq` and `MySong.mp3`
-- Audio files exist in: `/home/fpp/media/music/`
-- FPP REST API is available locally: `http://127.0.0.1/api/fppd/status`
+1. Creates a dedicated WiFi hotspot (called **SHOW_AUDIO**) using a USB WiFi adapter
+2. When visitors connect to that hotspot and open any webpage, they get redirected to a **listen page**
+3. The listen page downloads the current show audio and keeps it synced to whatever FPP is playing
+4. The show owner can start/stop playlists and sequences right from that same page
+5. The show owner can change the WiFi password from the page (under Options)
 
-## Install (on an FPP Pi)
+---
+
+## Important: Must Be Installed on the Master
+
+This must be installed on your **master** FPP (the one in **player mode**), not on a remote. It needs:
+
+- Direct access to the music files in `/home/fpp/media/music/`
+- The FPP API at `127.0.0.1` to read playback status and start/stop playlists
+- Remotes don't store media locally — they only receive channel data from the master
+
+If your master controls the show, that's where this goes.
+
+## What You Need
+
+Before you start, make sure you have:
+
+- A **Raspberry Pi** running **Falcon Player (FPP) in player (master) mode** — any version that uses `/opt/fpp/www/` as its web root (FPP 6+)
+- A **USB WiFi adapter** that supports AP (access point) mode — most cheap USB adapters work. It needs to show up as `wlan1` when you plug it in
+- Your FPP already has **sequences (.fseq files)** and matching **audio files (.mp3)** loaded
+- A computer on the same network as your FPP to run the install commands
+- Basic ability to type commands into a terminal (we'll walk you through every step)
+
+---
+
+## Step-by-Step Install
+
+### Step 1: Plug in the USB WiFi adapter
+
+Plug your USB WiFi adapter into one of the Pi's USB ports. It doesn't matter which one.
+
+### Step 2: Open a terminal to your FPP
+
+You need to get a command line on your FPP. Pick one of these methods:
+
+**Option A — SSH from your computer:**
+- **Windows:** Open PowerShell or Command Prompt and type:
+  ```
+  ssh fpp@YOUR_FPP_IP
+  ```
+  Replace `YOUR_FPP_IP` with your FPP's IP address (for example `10.1.66.204`).
+  When it asks for a password, type `falcon` and press Enter.
+
+- **Mac/Linux:** Open Terminal and type the same command above.
+
+**Option B — Use the FPP web interface:**
+- Open your browser and go to `http://YOUR_FPP_IP/`
+- Click on **Content Setup** in the menu
+- Click **File Manager**
+- (This method only works for uploading files — you'll still need SSH for the install command)
+
+### Step 3: Download this project onto your FPP
+
+Once you're logged in via SSH, type these commands one at a time (press Enter after each one):
+
 ```bash
 cd /home/fpp
-git clone https://github.com/YOUR_ACCOUNT/ChatGPT-fll0listen.git
-cd ChatGPT-fll0listen
+```
+
+```bash
+git clone https://github.com/TNash-FPP/ChatGPT-fpp-listen.git
+```
+
+```bash
+cd ChatGPT-fpp-listen
+```
+
+### Step 4: Run the installer
+
+```bash
 sudo ./install.sh
 ```
 
-Then open:
-- `http://listen.local/listen/` (if mDNS/captive portal configured)
-- or `http://192.168.50.1/listen/` (default AP IP in this bundle)
+You should see output like this:
+```
+=========================================
+  ChatGPT FPP Listener - v1.0
+=========================================
+
+[install] Web root: /opt/fpp/www
+[install] Deploying web files...
+[install] Web files deployed
+[install] Created /music symlink
+[install] Setting up listener config...
+[install] Default WiFi password: Listen123
+[install] Configuring sudoers...
+[install] Sudoers configured
+[install] listener-ap service installed
+
+=========================================
+  Install complete!
+=========================================
+  Page:     http://192.168.50.1/listen/
+  WiFi:     SHOW_AUDIO (WPA2)
+  Password: Listen123 (change via web UI)
+=========================================
+```
+
+### Step 5: Start the WiFi hotspot
+
+```bash
+sudo systemctl start listener-ap
+```
+
+This turns on the WiFi hotspot. It will also start automatically every time the Pi boots.
+
+### Step 6: Test it
+
+1. On your phone, look for a WiFi network called **SHOW_AUDIO**
+2. Connect to it using password **Listen123**
+3. Open your phone's browser and go to `http://192.168.50.1/listen/`
+4. You should see the Show Audio page with a Playback section at the top
+5. Select a sequence from the dropdown and tap **Start** — your lights and audio should begin
+
+That's it! You're done.
+
+---
+
+## How to Use It
+
+### Starting a show
+
+1. Open the listen page (either from the SHOW_AUDIO WiFi at `http://192.168.50.1/listen/` or from your main network at `http://YOUR_FPP_IP/listen/`)
+2. Pick a playlist or sequence from the dropdown
+3. Tap **Start**
+4. Audio will play through the phone speaker and lights will run on your display
+
+### Stopping a show
+
+Tap the **Stop** button.
+
+### Listening (for visitors)
+
+Tell your visitors to:
+1. Connect to the **SHOW_AUDIO** WiFi (give them the password)
+2. Open any webpage — they'll be redirected to the listen page
+3. Tap anywhere on the page to enable audio
+4. Keep the page open during the show
+
+### Changing the WiFi password
+
+1. On the listen page, scroll down and tap **Options**
+2. Type a new password (must be 8-63 characters)
+3. Tap **Change Password**
+4. The WiFi hotspot will restart — everyone will need to reconnect with the new password
+
+### Accessing from your main network
+
+The listen page works on both networks:
+- **WiFi hotspot:** `http://192.168.50.1/listen/`
+- **Main network:** `http://YOUR_FPP_IP/listen/`
+
+This is a developer tool, so there's no login required on your main network. The only security is the WPA2 password on the WiFi hotspot (wlan1).
+
+---
+
+## Troubleshooting
+
+### "I can't see the SHOW_AUDIO WiFi network"
+
+- Make sure your USB WiFi adapter is plugged in
+- Check if it's recognized: `ip link show wlan1` — you should see it listed
+- Make sure the service is running: `sudo systemctl status listener-ap`
+- Restart it: `sudo systemctl restart listener-ap`
+- Check the log: `journalctl -u listener-ap -n 30`
+
+### "The page loads but I hear no audio"
+
+- On iPhone, check that the **ringer switch** (on the side of the phone) is not on silent
+- Turn up the **volume** on the phone
+- Tap anywhere on the page — mobile browsers require a tap before they'll play audio
+- Check that you have `.mp3` files in `/home/fpp/media/music/` with the same name as your `.fseq` files (e.g. `Elvis.fseq` needs `Elvis.mp3`)
+
+### "The sequence starts but the lights don't do anything"
+
+This is an FPP output configuration issue, not a listener issue. Check:
+- Go to your FPP web interface (`http://YOUR_FPP_IP/`)
+- Click **Input/Output Setup** > **Channel Outputs**
+- Make sure your output universes are **active** (checkbox enabled)
+- Make sure the output IP addresses are correct (not your FPP's own IP)
+- If you see a warning like "UDP Output set to send data to myself" — that means one of your outputs is pointed at the FPP itself. Change it to the correct controller IP
+
+### "Audio is out of sync"
+
+- Tap the **Resync** button on the listen page
+- If it's consistently off, check that your Pi has the correct time (FPP usually handles this automatically)
+
+### "I can't connect to the WiFi anymore after changing the password"
+
+- The default password is `Listen123`
+- If you forgot your new password, SSH into the FPP and check: `cat /home/fpp/listen-sync/hostapd-listener.conf | grep wpa_passphrase`
+- To reset to default, edit the file: `sudo nano /home/fpp/listen-sync/hostapd-listener.conf`, change `wpa_passphrase=` to `Listen123`, save, then restart: `sudo systemctl restart listener-ap`
+
+---
+
+## Updating
+
+To get the latest version:
+
+```bash
+cd /home/fpp/ChatGPT-fpp-listen
+git pull
+sudo ./install.sh
+```
+
+Your WiFi password and settings will be preserved (the installer doesn't overwrite existing config).
+
+---
 
 ## Uninstall
+
+To completely remove everything this project installed:
+
 ```bash
-cd /home/fpp/ChatGPT-fll0listen
+cd /home/fpp/ChatGPT-fpp-listen
 sudo ./uninstall.sh
 ```
 
-## Files
-- `www/listen/index.html` – the listening page
-- `www/listen/status.php` – JSON status for clients (poll this)
-- `www/qrcode.html` – simple Wi‑Fi + URL QR generator
-- `server/listener-ap.service` – systemd unit to run AP setup script (optional)
-- `server/listener-ap.sh` – hostapd/dnsmasq + captive portal setup (optional)
+This removes:
+- All web files from `/opt/fpp/www/listen/`
+- The `/music` symlink
+- The `listener-ap` systemd service (stopped and disabled)
+- The sudoers entry for the web UI
+- The config directory at `/home/fpp/listen-sync/`
+- Any running hostapd/dnsmasq processes started by the listener
 
-> NOTE: The AP/captive portal pieces are provided as a solid starting point, but you may need to adjust for your USB Wi‑Fi adapter name (wlan1 vs wlan0) and your local networking preferences.
+After uninstalling, your FPP is exactly as it was before you installed this project. You can then delete the project folder:
+
+```bash
+rm -rf /home/fpp/ChatGPT-fpp-listen
+```
+
+---
+
+## Files
+
+| File | What it does |
+|------|-------------|
+| `www/listen/listen.html` | The main page — playback controls, audio sync, options |
+| `www/listen/index.html` | Redirects to listen.html |
+| `www/listen/status.php` | Returns current FPP playback status as JSON (polled 4x/second) |
+| `www/listen/admin.php` | Handles start/stop commands and WiFi password changes |
+| `www/listen/version.php` | Returns the FPP version number |
+| `www/listen/logo.png` | Undocumented Engineer logo |
+| `server/listener-ap.sh` | Script that starts the WiFi hotspot (hostapd + dnsmasq) |
+| `server/listener-ap.service` | Systemd service file for auto-starting the hotspot on boot |
+| `install.sh` | Installs everything |
+| `uninstall.sh` | Removes everything (restores FPP to original state) |
+
+---
+
+## Technical Details (for developers)
+
+- Audio sync uses 250ms polling of FPP's `/api/fppd/status` endpoint
+- Clock offset between phone and server is estimated using request midpoint timing
+- Hard seek when error exceeds 1 second, with 2-second cooldown between seeks
+- FPP only provides whole-second precision for `seconds_played`, so sub-second error is expected
+- Playback starts via `POST /api/command` with the "Start Playlist" command (works for both playlists and `.fseq` sequences)
+- The WiFi AP runs hostapd on wlan1 with dnsmasq for DHCP and DNS (all queries resolve to the AP IP for captive portal behavior)
+- Config is stored at `/home/fpp/listen-sync/hostapd-listener.conf` and persists across reboots
+- The web UI uses sudo via `/etc/sudoers.d/listener-sync` to write the hostapd config and restart the AP service
