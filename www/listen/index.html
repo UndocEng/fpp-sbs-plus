@@ -17,14 +17,7 @@
     body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; background:var(--bg); color:var(--ink); }
     .wrap{ max-width:720px; margin:0 auto; padding:18px; }
     .header{ text-align:center; margin:10px 0 18px; }
-    .logo{
-      width:86px; height:86px; border-radius:18px;
-      background:linear-gradient(145deg, rgba(0,229,255,.22), rgba(0,229,255,.04));
-      display:inline-flex; align-items:center; justify-content:center;
-      border:1px solid rgba(0,229,255,.28);
-      box-shadow:0 8px 28px rgba(0,0,0,.35);
-    }
-    .logo svg{ width:54px; height:54px; fill:var(--accent); opacity:.95; }
+    .header img{ width:86px; height:86px; border-radius:18px; box-shadow:0 8px 28px rgba(0,0,0,.35); }
     h1{ margin:12px 0 6px; font-size:34px; letter-spacing:.3px; color:var(--accent); }
     .sub{ margin:0; color:var(--muted); font-size:14px; }
     .card{
@@ -55,20 +48,14 @@
     .small{ margin-top:12px; font-size:12px; color:var(--muted); line-height:1.4; }
     .footer{ margin-top:14px; text-align:center; font-size:12px; color:var(--muted); opacity:.85; }
     audio{ width:100%; margin-top:12px; }
-    .warn{ margin-top:10px; font-size:12px; color:var(--muted); }
-    code{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; }
   </style>
 </head>
 <body>
 <div class="wrap">
   <div class="header">
-    <div class="logo" aria-hidden="true">
-      <svg viewBox="0 0 24 24">
-        <path d="M12 3a9 9 0 0 0-9 9v3a3 3 0 0 0 3 3h1v2h2v-2h6v2h2v-2h1a3 3 0 0 0 3-3v-3a9 9 0 0 0-9-9Zm7 12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-3a7 7 0 0 1 14 0v3Z"/>
-      </svg>
-    </div>
-    <h1>Listen</h1>
-    <p class="sub">Synced show audio on your phone</p>
+    <img src="logo.png" alt="Undocumented Engineer" />
+    <h1>Show Audio</h1>
+    <p class="sub">Tap once to enable audio. Keep this page open during the show.</p>
   </div>
 
   <div class="card">
@@ -82,13 +69,13 @@
       </div>
     </div>
 
-    <audio id="player" controls preload="auto" playsinline></audio>
+    <audio id="player" preload="auto" playsinline></audio>
 
     <div class="grid">
-      <div class="kv"><div class="k">Track</div><div class="v" id="track">—</div></div>
-      <div class="kv"><div class="k">Error</div><div class="v" id="err">—</div></div>
-      <div class="kv"><div class="k">Rate</div><div class="v" id="rate">—</div></div>
-      <div class="kv"><div class="k">Poll</div><div class="v" id="poll">—</div></div>
+      <div class="kv"><div class="k">Track</div><div class="v" id="track">&mdash;</div></div>
+      <div class="kv"><div class="k">Error</div><div class="v" id="err">&mdash;</div></div>
+      <div class="kv"><div class="k">Rate</div><div class="v" id="rate">&mdash;</div></div>
+      <div class="kv"><div class="k">Poll</div><div class="v" id="poll">&mdash;</div></div>
     </div>
 
     <div class="small">
@@ -96,23 +83,19 @@
       You may need to stay on this page (some phones pause background audio).
     </div>
 
-    <div class="footer" id="ver">Version: (loading…)</div>
+    <div class="footer" id="ver">Version: (loading&hellip;)</div>
   </div>
 </div>
 
 <script>
 (() => {
-  // ====== Config (Simple_Sync flavor) ======
+  // ====== Config ======
   const STATUS_URL = "./status.php";
-  const POLL_MS = 250;              // 4Hz
-  const RATE_MIN = 0.997;
-  const RATE_MAX = 1.003;
-  const SOFT_ERR_S = 0.35;          // start nudging
-  const HARD_SEEK_S = 1.00;         // only hard seek when way off
-  const STALE_MS = 3000;            // if server stops responding, show error
-  const AUDIO_BASE = "../music.php?file="; // proxy endpoint (keeps paths stable)
+  const POLL_MS = 250;
+  const HARD_SEEK_S = 1.0;          // seek if error exceeds this (seconds)
+  const SEEK_COOLDOWN_MS = 2000;    // don't seek more often than this
 
-  // ====== UI ======
+  // ====== UI refs ======
   const dot = document.getElementById("dot");
   const stateEl = document.getElementById("state");
   const trackEl = document.getElementById("track");
@@ -120,22 +103,24 @@
   const rateEl = document.getElementById("rate");
   const pollEl = document.getElementById("poll");
   const verEl = document.getElementById("ver");
-
   const enableBtn = document.getElementById("enable");
   const muteBtn = document.getElementById("mute");
   const resyncBtn = document.getElementById("resync");
   const audio = document.getElementById("player");
 
+  // ====== State ======
   let enabled = false;
   let muted = false;
-
-  // ====== Sync state ======
-  let last = null; // last status packet
-  let lastRecvMs = 0;
-  let currentTrack = null;
+  let currentBase = "";
   let pollTimer = null;
+  let haveMetadata = false;
+  let lastSeekMs = 0;
 
-  const nowMs = () => performance.now();
+  // Clock offset estimation
+  let clockOffset = 0;
+  let clockOffsetValid = false;
+  const OFFSET_HISTORY_SIZE = 8;
+  let offsetHistory = [];
 
   function setDot(mode){
     dot.classList.remove("ok","bad");
@@ -148,153 +133,168 @@
     setDot(ok ? "ok" : (ok===false ? "bad" : ""));
   }
 
-  function clamp(x,a,b){ return Math.max(a, Math.min(b,x)); }
+  function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
 
-  async function fetchJSON(url){
-    const r = await fetch(url, { cache: "no-store" });
-    if(!r.ok) throw new Error("HTTP " + r.status);
-    return await r.json();
-  }
-
-  function desiredSecondsFromPacket(pkt){
-    // pkt.pos_ms is the position at pkt.server_ms
-    const ageMs = (Date.now() - pkt.wall_ms);
-    // Blend: prefer server_ms monotonic-ish, but wall clock helps with client delay.
-    // pkt.server_ms is monotonic on server, pkt.wall_ms is epoch ms on server.
-    // We compute desired position using wall clock age since packet creation.
-    const desiredMs = pkt.pos_ms + clamp(ageMs, 0, 1500);
-    return desiredMs / 1000;
-  }
-
-  function ensureAudioSrc(trackBase){
-    // Use a PHP proxy so browser origin stays consistent and we can enforce allowlists.
-    // trackBase already includes extension (e.g. MySong.mp3)
-    const src = AUDIO_BASE + encodeURIComponent(trackBase);
-    if(audio.src !== new URL(src, location.href).href){
-      audio.src = src;
-      audio.load();
+  // ====== Clock offset ======
+  function updateClockOffset(serverMs, clientSendMs, rtt){
+    const sample = serverMs - clientSendMs - (rtt / 2);
+    offsetHistory.push(sample);
+    if(offsetHistory.length > OFFSET_HISTORY_SIZE) offsetHistory.shift();
+    const sorted = [...offsetHistory].sort((a,b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    if(!clockOffsetValid){
+      clockOffset = median;
+      clockOffsetValid = true;
+    } else {
+      clockOffset = clockOffset * 0.7 + median * 0.3;
     }
   }
 
-  function hardResync(pkt){
-    const desired = desiredSecondsFromPacket(pkt);
-    if(isFinite(audio.duration) && audio.duration > 0){
-      audio.currentTime = clamp(desired, 0, Math.max(0, audio.duration - 0.05));
+  // ====== Compute FPP target position in seconds ======
+  function getTargetSec(msg){
+    const nowMs = Date.now();
+    const serverMs = Number(msg.server_ms);
+    const rawPosMs = Number(msg.pos_ms || 0);
+    let targetMs = rawPosMs;
+    if(Number.isFinite(serverMs) && serverMs > 1e12 && Math.abs(nowMs - serverMs) < 300000){
+      let elapsed = clockOffsetValid ? ((nowMs + clockOffset) - serverMs) : (nowMs - serverMs);
+      if(!Number.isFinite(elapsed)) elapsed = 0;
+      elapsed = clamp(elapsed, 0, 1500);
+      targetMs = rawPosMs + elapsed;
     }
+    return targetMs / 1000.0;
   }
 
-  function servo(pkt){
-    if(!enabled) return;
+  // ====== Sync ======
+  function sync(msg){
+    trackEl.textContent = msg.base || "\u2014";
 
-    // keep mute state
-    audio.muted = muted;
-
-    // load track if needed
-    if(pkt.track && pkt.track !== currentTrack){
-      currentTrack = pkt.track;
-      trackEl.textContent = currentTrack;
-      ensureAudioSrc(currentTrack);
-      // on track change, wait for metadata then hard align once
-      const onMeta = () => {
-        audio.removeEventListener("loadedmetadata", onMeta);
-        hardResync(pkt);
-        if(pkt.playing) audio.play().catch(()=>{});
-      };
-      audio.addEventListener("loadedmetadata", onMeta);
-    } else if(pkt.track) {
-      trackEl.textContent = pkt.track;
-    }
-
-    // play/pause follow
-    if(pkt.playing){
-      if(audio.paused) audio.play().catch(()=>{});
-    }else{
+    // --- Stop state: pause and reset ---
+    if(msg.state === "stop" || !msg.base){
       if(!audio.paused) audio.pause();
-    }
-
-    // servo if we have duration/metadata
-    if(!(isFinite(audio.duration) && audio.duration > 0)) return;
-
-    const desired = desiredSecondsFromPacket(pkt);
-    const err = desired - audio.currentTime;
-
-    // UI
-    errEl.textContent = (err>=0?"+":"") + err.toFixed(3) + "s";
-    rateEl.textContent = audio.playbackRate.toFixed(5) + "x";
-
-    const absErr = Math.abs(err);
-
-    if(absErr >= HARD_SEEK_S){
+      audio.currentTime = 0;
       audio.playbackRate = 1.0;
-      audio.currentTime = clamp(desired, 0, Math.max(0, audio.duration - 0.05));
+      currentBase = "";
+      haveMetadata = false;
+      setState("Idle", null);
+      errEl.textContent = "\u2014";
+      rateEl.textContent = "\u2014";
       return;
     }
 
-    if(absErr < SOFT_ERR_S){
+    // --- Pause state ---
+    if(msg.state === "pause"){
+      if(!audio.paused) audio.pause();
       audio.playbackRate = 1.0;
+      setState("Paused", true);
       return;
     }
 
-    // Gentle nudging, clamped ~0.997–1.003
-    // Scale: 0.003x at ~1s would be too much; we keep subtle.
-    const k = 0.003; // maximum adjustment range
-    const adj = clamp(err * 0.0025, -k, k); // proportional
-    audio.playbackRate = clamp(1.0 + adj, RATE_MIN, RATE_MAX);
+    // --- Playing ---
+    setState("Playing", true);
+
+    // Track change — load new source
+    if(msg.base && msg.base !== currentBase){
+      currentBase = msg.base;
+      haveMetadata = false;
+      audio.src = msg.mp3_url || "";
+      audio.load();
+      audio.addEventListener("loadedmetadata", function onMeta(){
+        audio.removeEventListener("loadedmetadata", onMeta);
+        haveMetadata = true;
+        // Don't seek with stale msg data — let the next poll tick
+        // handle positioning with fresh data (250ms away at most)
+      });
+      return;
+    }
+
+    // Wait for metadata
+    if(!haveMetadata || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+
+    const targetSec = getTargetSec(msg);
+    const localSec = audio.currentTime || 0;
+    const errSec = targetSec - localSec;
+
+    // Update display
+    errEl.textContent = (errSec >= 0 ? "+" : "") + (errSec * 1000).toFixed(0) + " ms";
+    rateEl.textContent = audio.playbackRate.toFixed(3) + "x";
+
+    const absErr = Math.abs(errSec);
+    const nowMs = Date.now();
+
+    // Hard seek if off by more than 1s (or first sync after load)
+    if(absErr > HARD_SEEK_S && (nowMs - lastSeekMs) > SEEK_COOLDOWN_MS){
+      audio.currentTime = clamp(targetSec, 0, Math.max(0, audio.duration - 0.1));
+      audio.playbackRate = 1.0;
+      lastSeekMs = nowMs;
+      if(audio.paused) audio.play().catch(() => {});
+      return;
+    }
+
+    // Ensure playing
+    if(audio.paused) audio.play().catch(() => {});
+
+    // Within 1s — play at normal speed. FPP only gives whole-second
+    // precision so sub-second error is just quantization noise.
+    audio.playbackRate = 1.0;
   }
 
+  // ====== Polling ======
   async function tick(){
-    try{
-      const t0 = nowMs();
-      const pkt = await fetchJSON(STATUS_URL);
-      const t1 = nowMs();
-      pollEl.textContent = Math.round(t1 - t0) + "ms";
+    const t0 = Date.now();
+    try {
+      const r = await fetch(STATUS_URL + "?ts=" + t0, { cache: "no-store" });
+      if(!r.ok) throw new Error("HTTP " + r.status);
+      const msg = await r.json();
+      const t1 = Date.now();
+      const rtt = t1 - t0;
+      pollEl.textContent = rtt + " ms";
 
-      last = pkt;
-      lastRecvMs = nowMs();
-
-      if(pkt.ok){
-        if(pkt.playing) setState("Playing", true);
-        else setState("Idle", true);
-
-        if(!enabled){
-          // show track but don't auto-play until user taps
-          if(pkt.track) trackEl.textContent = pkt.track;
-        } else {
-          servo(pkt);
-        }
-      } else {
-        setState("No show", false);
+      // Update clock offset
+      if(msg.server_ms && rtt > 0 && rtt < 500){
+        updateClockOffset(msg.server_ms, t0, rtt);
       }
-    }catch(e){
+
+      if(enabled){
+        sync(msg);
+      } else {
+        // Show current state but don't control audio
+        if(msg.state === "play" && msg.base){
+          setState("Playing", true);
+          trackEl.textContent = msg.base;
+        } else {
+          setState("Idle", null);
+        }
+      }
+    } catch(e){
       setState("Disconnected", false);
     }
   }
 
   function startPolling(){
     if(pollTimer) return;
-    pollTimer = setInterval(() => {
-      tick();
-      // stale detection
-      if(enabled && lastRecvMs && (nowMs() - lastRecvMs) > STALE_MS){
-        setState("Stale", false);
-      }
-    }, POLL_MS);
+    pollTimer = setInterval(tick, POLL_MS);
     tick();
   }
 
   // ====== UI events ======
   enableBtn.addEventListener("click", async () => {
     enabled = true;
+    enableBtn.textContent = "Audio Enabled";
     setState("Enabled", true);
-    // prime audio pipeline (iOS gesture requirement)
-    try{
-      await audio.play();
-      audio.pause();
-    }catch(_){}
-    if(last && last.ok){
-      currentTrack = null; // force src set
-      servo(last);
-    }
+
+    // Audio unlock gesture
+    try {
+      audio.muted = true;
+      const p = audio.play();
+      if(p && typeof p.then === 'function'){
+        await p.then(() => { audio.pause(); audio.currentTime = 0; audio.muted = false; })
+               .catch(() => { audio.muted = false; });
+      } else {
+        audio.muted = false;
+      }
+    } catch(_){ audio.muted = false; }
+
     startPolling();
   });
 
@@ -305,14 +305,17 @@
   });
 
   resyncBtn.addEventListener("click", () => {
-    if(last) hardResync(last);
+    if(!haveMetadata || !currentBase) return;
+    // Force immediate resync on next tick by clearing cooldown
+    lastSeekMs = 0;
   });
 
-  // fetch version (optional)
-  fetch("../version.php").then(r=>r.text()).then(t=>{
+  // Fetch version
+  fetch("./version.php?t=" + Date.now()).then(r => r.text()).then(t => {
     verEl.textContent = "Version: " + (t || "").trim();
-  }).catch(()=>{ verEl.textContent = "Version: unknown"; });
+  }).catch(() => { verEl.textContent = "Version: unknown"; });
 
+  // Start polling immediately to show status even before enable
   startPolling();
 })();
 </script>

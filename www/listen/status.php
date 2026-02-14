@@ -1,122 +1,101 @@
 <?php
-// status.php
-// Returns JSON describing what FPP is doing + a server timestamp.
-// Clients poll this at 4Hz for smooth sync behavior.
-//
-// Output fields:
-//   ok (bool)          -> true if we can determine a playable track/position
-//   playing (bool)     -> whether show is currently playing
-//   track (string)     -> audio filename (e.g. MySong.mp3)
-//   pos_ms (int)       -> position into track in milliseconds
-//   server_ms (int)    -> monotonic-ish ms (not epoch) from PHP process start
-//   wall_ms (int)      -> epoch ms (Date.now()-compatible)
-//   src (string)       -> audio URL for the client to load (relative)
 
-header('Content-Type: application/json; charset=utf-8');
+header('Content-Type: application/json');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
 
-$start = microtime(true);
-
-// Server clocks
-$server_ms = (int) round(microtime(true) * 1000);
-$wall_ms   = (int) round((microtime(true) + (time() - microtime(true))) * 1000); // epoch-ish ms
-
-// FPP status endpoint (local)
-$fpp_url = 'http://127.0.0.1/api/fppd/status';
 
 function http_get_json($url) {
-  $ctx = stream_context_create([
-    'http' => [
-      'timeout' => 1.5,
-      'ignore_errors' => true,
-      'header' => "Accept: application/json\r\n"
-    ]
-  ]);
+  $ctx = stream_context_create(['http' => ['timeout' => 1.0]]);
   $raw = @file_get_contents($url, false, $ctx);
   if ($raw === false) return null;
-  $data = json_decode($raw, true);
-  if (!is_array($data)) return null;
-  return $data;
+  $js = json_decode($raw, true);
+  if (!is_array($js)) return null;
+  return $js;
 }
 
-// Attempt to infer play state + elapsed time + media/sequence name from various FPP payload shapes.
-// You may customize this for your specific FPP version if desired.
-$data = http_get_json($fpp_url);
 
-$playing = false;
-$elapsed_s = null;
-$base = null;
-
-// Heuristics for "playing"
-if (is_array($data)) {
-  if (isset($data['status'])) {
-    $playing = ($data['status'] === 'playing');
-  } elseif (isset($data['playing'])) {
-    $playing = (bool)$data['playing'];
-  }
+function basename_noext($path) {
+  if (!$path) return "";
+  $p = basename($path);
+  return preg_replace('/\.[^.]+$/', '', $p);
 }
 
-// Heuristics for elapsed seconds
-$elapsed_candidates = ['elapsed', 'seconds_elapsed', 'elapsedSeconds', 'timeElapsed', 'elapsed_time'];
-foreach ($elapsed_candidates as $k) {
-  if (isset($data[$k]) && is_numeric($data[$k])) { $elapsed_s = (float)$data[$k]; break; }
+
+$srcUrl = "http://127.0.0.1/api/fppd/status";
+
+// Capture timing around FPP call for clock offset estimation
+// Use round() not intval() - intval() overflows on 32-bit PHP (Pi 3B)
+$server_ms_start = round(microtime(true) * 1000);
+$src = http_get_json($srcUrl);
+$server_ms_end = round(microtime(true) * 1000);
+// Midpoint is best estimate of when pos_ms was valid
+$server_ms = round(($server_ms_start + $server_ms_end) / 2);
+
+
+if ($src === null) {
+  echo json_encode([
+    "state" => "stop",
+    "base" => "",
+    "pos_ms" => 0,
+    "mp3_url" => "",
+    "server_ms" => $server_ms,
+    "debug" => "Cannot read $srcUrl"
+  ]);
+  exit;
 }
 
-// Sometimes FPP nests time fields
-if ($elapsed_s === null && isset($data['time']) && is_array($data['time'])) {
-  foreach (['elapsed', 'seconds_elapsed'] as $k) {
-    if (isset($data['time'][$k]) && is_numeric($data['time'][$k])) { $elapsed_s = (float)$data['time'][$k]; break; }
-  }
+
+$status = isset($src["status"]) ? intval($src["status"]) : -1;
+$status_name = isset($src["status_name"]) ? strval($src["status_name"]) : "";
+
+$state = "stop";
+$sn = strtolower($status_name);
+if ($sn === "playing" || $sn === "play") $state = "play";
+else if ($sn === "paused" || $sn === "pause") $state = "pause";
+else if ($sn === "idle" || $sn === "stopped" || $sn === "stop") $state = "stop";
+else {
+  if ($status === 1) $state = "play";
+  else if ($status === 2) $state = "pause";
+  else $state = "stop";
 }
 
-// Identify current item / sequence base name.
-// Many installations: audio file name matches sequence base name.
-// We try multiple known keys.
-$name_candidates = [
-  'song', 'current_song', 'media', 'sequence', 'current_sequence', 'fseq', 'filename', 'mediaFilename'
-];
 
-foreach ($name_candidates as $k) {
-  if (!isset($data[$k])) continue;
+$seq = isset($src["current_sequence"]) ? strval($src["current_sequence"]) : "";
+$base = basename_noext($seq);
 
-  $v = $data[$k];
+$sec_played = 0.0;
+if (isset($src["seconds_played"])) $sec_played = floatval($src["seconds_played"]);
+$pos_ms = intval($sec_played * 1000.0);
 
-  if (is_string($v) && strlen($v)) { $base = $v; break; }
-  if (is_array($v)) {
-    foreach (['file','filename','name','media','sequence'] as $kk) {
-      if (isset($v[$kk]) && is_string($v[$kk]) && strlen($v[$kk])) { $base = $v[$kk]; break 2; }
+
+// Check for audio file - prefer MP3, fall back to M4A, then other formats
+$audio_url = "";
+if ($base !== "") {
+  $music_dir = "/home/fpp/media/music";
+  $formats = ["mp3", "m4a", "mp4", "aac", "ogg", "wav"];
+
+  foreach ($formats as $ext) {
+    if (file_exists("$music_dir/$base.$ext")) {
+      $audio_url = "/music/" . rawurlencode($base) . ".$ext";
+      break;
     }
   }
 }
 
-// Normalize base to strip extension and directories
-if (is_string($base) && strlen($base)) {
-  $base = basename($base);
-  // If it's an fseq, map to mp3 by default (client will request through music.php)
-  // If it already ends with an audio extension, leave it.
-  $lower = strtolower($base);
-  $audio_exts = ['.mp3','.m4a','.aac','.ogg','.wav'];
-  $is_audio = false;
-  foreach($audio_exts as $ext){
-    if (substr($lower, -strlen($ext)) === $ext) { $is_audio = true; break; }
-  }
-  if (!$is_audio) {
-    // strip known non-audio extensions and default to .mp3
-    $base = preg_replace('/\.(fseq|seq|eseq|mp4|mov)$/i', '', $base);
-    $base = $base . '.mp3';
-  }
-}
+$mp3_url = $audio_url;
 
-$ok = (is_string($base) && strlen($base) && $elapsed_s !== null);
 
-$out = [
-  'ok' => $ok,
-  'playing' => $playing && $ok,
-  'track' => $ok ? $base : null,
-  'pos_ms' => $ok ? (int)round($elapsed_s * 1000.0) : 0,
-  'server_ms' => $server_ms,
-  'wall_ms' => (int) round(microtime(true) * 1000), // close enough for Date.now() math
-  'src' => $ok ? ('../music.php?file=' . rawurlencode($base)) : null,
-];
-
-echo json_encode($out, JSON_UNESCAPED_SLASHES);
+echo json_encode([
+  "state" => $state,
+  "base" => $base,
+  "pos_ms" => $pos_ms,
+  "mp3_url" => $mp3_url,
+  "server_ms" => $server_ms,
+  "server_ms_start" => $server_ms_start,
+  "server_ms_end" => $server_ms_end,
+  "debug_status" => $status,
+  "debug_status_name" => $status_name,
+  "debug_seq" => $seq,
+  "debug_seconds_played" => $sec_played
+]);
