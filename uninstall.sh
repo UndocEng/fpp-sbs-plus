@@ -26,8 +26,27 @@ if systemctl is-enabled listener-ap >/dev/null 2>&1; then
   sudo systemctl disable listener-ap
 fi
 sudo rm -f /etc/systemd/system/listener-ap.service
-sudo systemctl daemon-reload
 echo "[uninstall] listener-ap service removed"
+
+# 1b. Stop and disable ws-sync service
+echo "[uninstall] Stopping ws-sync service..."
+if systemctl is-active ws-sync >/dev/null 2>&1; then
+  sudo systemctl stop ws-sync
+fi
+if systemctl is-enabled ws-sync >/dev/null 2>&1; then
+  sudo systemctl disable ws-sync
+fi
+sudo rm -f /etc/systemd/system/ws-sync.service
+sudo systemctl daemon-reload
+echo "[uninstall] ws-sync service removed"
+
+# 1c. Remove Apache WebSocket proxy config
+echo "[uninstall] Removing Apache listener config..."
+sudo a2disconf listener 2>/dev/null || true
+sudo rm -f /etc/apache2/conf-available/listener.conf
+sudo rm -f /etc/apache2/conf-enabled/listener.conf
+sudo systemctl restart apache2 2>/dev/null || true
+echo "[uninstall] Apache listener config removed"
 
 # 2. Remove sudoers entry
 echo "[uninstall] Removing sudoers entry..."
