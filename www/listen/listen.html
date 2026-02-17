@@ -48,7 +48,12 @@
       width:100%; font-size:16px; padding:10px 12px; border-radius:10px;
       border:1px solid rgba(255,255,255,.12); background:rgba(0,0,0,.18); color:var(--ink);
     }
-    .btn-sm{ font-size:14px; padding:10px 14px; margin-top:10px; }
+    .btn-sm{ font-size:14px; padding:10px 14px; margin-top:10px; width:auto; display:inline-block; }
+    .opts-toggle{ cursor:pointer; color:var(--accent); font-size:15px; padding:4px 0; user-select:none; }
+    .opts-body{ display:none; margin-top:12px; }
+    .opts-body.open{ display:block; }
+    .field-group{ margin-top:14px; }
+    .field-group p{ margin:0 0 6px; font-size:14px; color:var(--muted); }
     .status-msg{ margin-top:8px; font-size:12px; padding:8px; border-radius:8px; display:none; }
     .status-msg.success{ background:rgba(77,255,136,.15); color:var(--ok); }
     .status-msg.error{ background:rgba(255,77,77,.15); color:var(--bad); }
@@ -81,6 +86,30 @@
       <button id="stopSeq">Stop</button>
     </div>
     <div id="seqStatus" class="status-msg"></div>
+  </div>
+
+  <!-- WiFi AP Options -- only shown if wlan1 exists -->
+  <div class="card" id="optionsCard" style="display:none;">
+    <div class="opts-toggle" id="optsToggle">&#9660; WiFi AP Settings</div>
+    <div class="opts-body" id="optsBody">
+      <div id="apStatusLine" style="font-size:13px;color:var(--muted);margin-bottom:8px;"></div>
+      <div class="field-group">
+        <p>Network Name (SSID)</p>
+        <input type="text" id="newSSID" placeholder="SHOW_AUDIO" maxlength="32">
+        <button class="btn-sm" id="changeSSID">Change SSID</button>
+      </div>
+      <div class="field-group">
+        <p>Password (8-63 characters)</p>
+        <input type="password" id="newPass" maxlength="63">
+        <button class="btn-sm" id="changePass">Change Password</button>
+      </div>
+      <div class="field-group">
+        <p>AP IP Address</p>
+        <input type="text" id="newIP" placeholder="192.168.50.1">
+        <button class="btn-sm" id="changeIP">Change IP</button>
+      </div>
+      <div id="apStatus" class="status-msg"></div>
+    </div>
   </div>
 
   <!-- Sync Status -->
@@ -861,6 +890,7 @@ const seqStatus = document.getElementById("seqStatus");
   try {
     const res = await adminPost({ action: "get_sequences" });
     if(!res.success) return;
+    initWiFiCard(res.has_wlan1, res.current_ssid);
     seqSelect.innerHTML = '<option value="">-- Select --</option>';
     if(Array.isArray(res.playlists) && res.playlists.length > 0){
       const grp = document.createElement("optgroup");
@@ -903,6 +933,85 @@ stopSeqBtn.addEventListener("click", async () => {
     showStatus(seqStatus, res.success ? "Stopped" : (res.error || "Failed"), res.success);
   } catch(e){ showStatus(seqStatus, "Network error", false); }
   stopSeqBtn.disabled = false; stopSeqBtn.textContent = "Stop";
+});
+
+
+// ====== Admin: WiFi AP Settings ======
+const optionsCard = document.getElementById("optionsCard");
+const optsToggle = document.getElementById("optsToggle");
+const optsBody = document.getElementById("optsBody");
+const apStatusLine = document.getElementById("apStatusLine");
+const apStatus = document.getElementById("apStatus");
+
+optsToggle.addEventListener("click", () => {
+  const open = optsBody.classList.toggle("open");
+  optsToggle.innerHTML = (open ? "&#9650;" : "&#9660;") + " WiFi AP Settings";
+});
+
+// Show WiFi card if wlan1 detected (piggyback on get_sequences response)
+// Called from loadSequences below
+function initWiFiCard(hasWlan1, currentSSID) {
+  if (!hasWlan1) return;
+  optionsCard.style.display = "";
+  if (currentSSID) document.getElementById("newSSID").placeholder = currentSSID;
+  // Load full AP config
+  loadAPConfig();
+}
+
+async function loadAPConfig() {
+  try {
+    const res = await adminPost({ action: "get_ap_config" });
+    if (!res.success) return;
+    if (res.ssid) document.getElementById("newSSID").placeholder = res.ssid;
+    if (res.ip) document.getElementById("newIP").placeholder = res.ip;
+    apStatusLine.textContent = "AP " + (res.service_active ? "active" : "inactive") +
+      " | SSID: " + (res.ssid || "?") + " | IP: " + (res.ip || "?");
+  } catch(e) {}
+}
+
+document.getElementById("changeSSID").addEventListener("click", async () => {
+  const ssid = document.getElementById("newSSID").value.trim();
+  if (!ssid || ssid.length < 1 || ssid.length > 32) {
+    showStatus(apStatus, "SSID must be 1-32 characters", false); return;
+  }
+  try {
+    const res = await adminPost({ action: "change_ssid", ssid: ssid });
+    showStatus(apStatus, res.success ? res.message : (res.error || "Failed"), res.success);
+    if (res.success) {
+      document.getElementById("newSSID").placeholder = ssid;
+      document.getElementById("newSSID").value = "";
+      loadAPConfig();
+    }
+  } catch(e) { showStatus(apStatus, "Network error", false); }
+});
+
+document.getElementById("changePass").addEventListener("click", async () => {
+  const pass = document.getElementById("newPass").value;
+  if (pass.length < 8 || pass.length > 63) {
+    showStatus(apStatus, "Password must be 8-63 characters", false); return;
+  }
+  try {
+    const res = await adminPost({ action: "change_password", password: pass });
+    showStatus(apStatus, res.success ? res.message : (res.error || "Failed"), res.success);
+    if (res.success) document.getElementById("newPass").value = "";
+  } catch(e) { showStatus(apStatus, "Network error", false); }
+});
+
+document.getElementById("changeIP").addEventListener("click", async () => {
+  const ip = document.getElementById("newIP").value.trim();
+  if (!ip || !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+    showStatus(apStatus, "Enter a valid IPv4 address", false); return;
+  }
+  // Warn the user that changing IP will disconnect them
+  if (!confirm("Changing the AP IP will disconnect you.\nNew address: http://" + ip + "/listen/\n\nContinue?")) return;
+  try {
+    const res = await adminPost({ action: "change_ip", ip: ip });
+    showStatus(apStatus, res.success ? res.message : (res.error || "Failed"), res.success);
+    if (res.success) {
+      document.getElementById("newIP").placeholder = ip;
+      document.getElementById("newIP").value = "";
+    }
+  } catch(e) { showStatus(apStatus, "Network error", false); }
 });
 
 
