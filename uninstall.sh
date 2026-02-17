@@ -17,15 +17,27 @@ if [[ ! -d "$WEBROOT" ]]; then
   WEBROOT=""
 fi
 
-# 1. Stop and disable the listener-ap service (legacy, may not exist)
+# 1. Stop and disable the listener-ap service
+echo "[uninstall] Stopping listener-ap service..."
 if systemctl is-active listener-ap >/dev/null 2>&1; then
-  echo "[uninstall] Stopping listener-ap service..."
   sudo systemctl stop listener-ap
 fi
 if systemctl is-enabled listener-ap >/dev/null 2>&1; then
   sudo systemctl disable listener-ap
 fi
 sudo rm -f /etc/systemd/system/listener-ap.service
+echo "[uninstall] listener-ap service removed"
+
+# Kill any leftover hostapd/dnsmasq started by our script
+if pgrep -f "hostapd-listener.conf" >/dev/null 2>&1; then
+  sudo pkill -f "hostapd-listener.conf" || true
+  echo "[uninstall] Stopped listener hostapd"
+fi
+if pgrep -f "listener-dnsmasq.conf" >/dev/null 2>&1; then
+  sudo pkill -f "listener-dnsmasq.conf" || true
+  echo "[uninstall] Stopped listener dnsmasq"
+fi
+sudo rm -f /tmp/listener-dnsmasq.conf
 
 # 2. Stop and disable ws-sync service
 echo "[uninstall] Stopping ws-sync service..."
@@ -47,8 +59,10 @@ sudo rm -f /etc/apache2/conf-enabled/listener.conf
 sudo systemctl restart apache2 2>/dev/null || true
 echo "[uninstall] Apache listener config removed"
 
-# 4. Remove sudoers entry (legacy, may not exist)
+# 4. Remove sudoers entry
+echo "[uninstall] Removing sudoers entry..."
 sudo rm -f /etc/sudoers.d/listener-sync
+echo "[uninstall] Sudoers entry removed"
 
 # 5. Remove web files
 if [[ -n "$WEBROOT" ]]; then
