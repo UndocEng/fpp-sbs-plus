@@ -87,6 +87,7 @@ if [[ ! -f "$AP_CONF" ]]; then
   sudo tee "$AP_CONF" > /dev/null <<'EOF'
 # AP Configuration for FPP Eavesdrop
 # Edit via web UI or manually. Changes take effect on service restart.
+WLAN_IF=wlan1
 AP_IP=192.168.50.1
 AP_MASK=24
 EOF
@@ -96,11 +97,18 @@ else
   echo "[install] AP config exists, keeping current settings"
 fi
 
+# Read configured interface from ap.conf
+WLAN_IF="wlan1"
+if [[ -f "$AP_CONF" ]]; then
+  source "$AP_CONF"
+  WLAN_IF="${WLAN_IF:-wlan1}"
+fi
+
 # Deploy default hostapd config with WPA2 (if not already present)
 HOSTAPD_CONF="$LISTEN_SYNC/hostapd-listener.conf"
 if [[ ! -f "$HOSTAPD_CONF" ]]; then
-  sudo tee "$HOSTAPD_CONF" > /dev/null <<'EOF'
-interface=wlan1
+  sudo tee "$HOSTAPD_CONF" > /dev/null <<EOF
+interface=$WLAN_IF
 driver=nl80211
 ssid=SHOW_AUDIO
 hw_mode=g
@@ -133,6 +141,7 @@ sudo tee "$SUDOERS_FILE" > /dev/null <<'EOF'
 www-data ALL=(ALL) NOPASSWD: /usr/bin/tee /home/fpp/listen-sync/hostapd-listener.conf
 www-data ALL=(ALL) NOPASSWD: /usr/bin/tee /home/fpp/listen-sync/ap.conf
 www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart listener-ap.service
+www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop hostapd
 EOF
 sudo chmod 440 "$SUDOERS_FILE"
 
@@ -161,13 +170,13 @@ if [[ -f "$ROOT_DIR/server/listener-ap.service" ]]; then
   sudo systemctl enable listener-ap 2>/dev/null || true
   echo "[install] listener-ap service installed"
 
-  # Only start if wlan1 is present
-  if [[ -e /sys/class/net/wlan1 ]]; then
+  # Only start if the configured interface is present
+  if [[ -e "/sys/class/net/$WLAN_IF" ]]; then
     sudo systemctl restart listener-ap 2>/dev/null || true
-    echo "[install] listener-ap service started (wlan1 detected)"
+    echo "[install] listener-ap service started ($WLAN_IF detected)"
   else
-    echo "[install] wlan1 not detected -- listener-ap enabled but not started"
-    echo "          Plug in a USB WiFi adapter and run: sudo systemctl start listener-ap"
+    echo "[install] $WLAN_IF not detected -- listener-ap enabled but not started"
+    echo "          Connect $WLAN_IF and run: sudo systemctl start listener-ap"
   fi
 fi
 
@@ -252,6 +261,39 @@ $(document).ready(function() {
             .on('click', function() { window.open('/listen/', '_blank'); });
         $('#rebootShutdown').prepend(btn);
     }
+
+    // SBS mode warning on FPP Network Config page
+    if (window.location.pathname === '/networkconfig.php' || window.location.pathname === '/networkconfig.php/') {
+        $.getJSON('/listen/admin.php', { action: 'get_ap_config' }, function(res) {
+            if (!res.success || res.ap_iface !== 'wlan0') return;
+            // Inject warning banner
+            var banner = $('<div>')
+                .css({
+                    background: '#4a0000', border: '2px solid #d33',
+                    borderRadius: '6px', padding: '12px 16px', margin: '10px 0 16px',
+                    color: '#ff6b6b', fontWeight: '600', fontSize: '14px'
+                })
+                .html('<i class="fas fa-exclamation-triangle"></i> ' +
+                    '<b>SBS Mode Active</b> — wlan0 is running the Eavesdrop listener AP. ' +
+                    'Scanning or changing wlan0 settings here will <b>disconnect all listeners</b>. ' +
+                    '<a href="/listen/listen.html" style="color:#6bf;margin-left:4px;">Manage AP in Eavesdrop</a>');
+            $('h1.title').after(banner);
+
+            // Intercept wlan0 selection — warn before scan fires
+            var origLoadSIDS = window.LoadSIDS;
+            if (typeof origLoadSIDS === 'function') {
+                window.LoadSIDS = function(iface) {
+                    if (iface === 'wlan0' && !confirm(
+                        'SBS Mode is active — wlan0 is running the Eavesdrop AP.\n\n' +
+                        'Scanning will disconnect all listeners.\n\nContinue anyway?'
+                    )) {
+                        return;
+                    }
+                    return origLoadSIDS.apply(this, arguments);
+                };
+            }
+        });
+    }
 });
 // -- end fpp-eavesdrop --
 JSEOF
@@ -284,8 +326,8 @@ if command -v curl >/dev/null 2>&1; then
   fi
 fi
 
-# Check listener-ap service (only if wlan1 exists)
-if [[ -e /sys/class/net/wlan1 ]]; then
+# Check listener-ap service (only if configured interface exists)
+if [[ -e "/sys/class/net/$WLAN_IF" ]]; then
   if systemctl is-active listener-ap >/dev/null 2>&1; then
     echo "[test] listener-ap service: OK"
   else
@@ -308,8 +350,10 @@ echo "  Install complete!"
 echo "========================================="
 echo "  Page:  http://${LOCAL_IP}/listen/"
 echo "  Sync:  WebSocket (ws://${LOCAL_IP}/ws)"
-if [[ -e /sys/class/net/wlan1 ]]; then
-echo "  WiFi:  ${AP_SSID} (WPA2)"
+if [[ -e "/sys/class/net/$WLAN_IF" ]]; then
+SBS_NOTE=""
+[[ "$WLAN_IF" == "wlan0" ]] && SBS_NOTE=" (SBS mode)"
+echo "  WiFi:  ${AP_SSID} (WPA2) on ${WLAN_IF}${SBS_NOTE}"
 echo "  AP IP: ${AP_IP}"
 echo "  Pass:  Listen123 (change via web UI)"
 fi

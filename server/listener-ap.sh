@@ -16,6 +16,18 @@ AP_MASK="${AP_MASK:-24}"
 
 echo "[listener-ap] Using interface: $WLAN_IF"
 
+# SBS mode (wlan0): stop FPP's hostapd to avoid conflict on the same interface
+if [[ "$WLAN_IF" == "wlan0" ]]; then
+  echo "[listener-ap] SBS mode -- stopping FPP hostapd if running..."
+  sudo systemctl stop hostapd 2>/dev/null || true
+  # Remove FPP tether networkd config if it exists (assigns 192.168.8.1 to wlan0)
+  if [[ -f /etc/systemd/network/10-wlan0.network ]]; then
+    sudo rm -f /etc/systemd/network/10-wlan0.network
+    sudo systemctl restart systemd-networkd 2>/dev/null || true
+    echo "[listener-ap] Removed FPP tether network config"
+  fi
+fi
+
 sudo ip link set "$WLAN_IF" down || true
 sudo ip addr flush dev "$WLAN_IF" || true
 sudo ip addr add "$AP_IP/$AP_MASK" dev "$WLAN_IF"

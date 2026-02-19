@@ -136,26 +136,31 @@
     <div class="footer" id="verFooter"></div>
   </div>
 
-  <!-- WiFi AP Options -- only shown if wlan1 exists -->
+  <!-- WiFi AP Options -- shown if any wlan interface exists -->
   <div class="card" id="optionsCard" style="display:none;">
     <div class="opts-toggle" id="optsToggle">&#9660; WiFi AP Settings</div>
     <div class="opts-body" id="optsBody">
       <div id="apStatusLine" style="font-size:13px;color:var(--muted);margin-bottom:8px;"></div>
       <div class="field-group">
+        <p>AP Interface</p>
+        <select id="apIface">
+          <option value="wlan1">wlan1 — USB adapter</option>
+          <option value="wlan0">wlan0 — Single Board Show (SBS)</option>
+        </select>
+      </div>
+      <div class="field-group">
         <p>Network Name (SSID)</p>
         <input type="text" id="newSSID" placeholder="SHOW_AUDIO" maxlength="32">
-        <button class="btn-sm" id="changeSSID">Change SSID</button>
       </div>
       <div class="field-group">
         <p>Password (8-63 characters)</p>
         <input type="password" id="newPass" maxlength="63">
-        <button class="btn-sm" id="changePass">Change Password</button>
       </div>
       <div class="field-group">
         <p>AP IP Address</p>
         <input type="text" id="newIP" placeholder="192.168.50.1">
-        <button class="btn-sm" id="changeIP">Change IP</button>
       </div>
+      <button id="applyAP" style="margin-top:14px;">Save &amp; Restart AP</button>
       <div id="apStatus" class="status-msg"></div>
       <div style="margin-top:12px;border-top:1px solid rgba(255,255,255,.08);padding-top:10px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
@@ -899,7 +904,7 @@ const seqStatus = document.getElementById("seqStatus");
   try {
     const res = await adminPost({ action: "get_sequences" });
     if(!res.success) return;
-    initWiFiCard(res.has_wlan1, res.current_ssid);
+    initWiFiCard(res.has_wlan, res.current_ssid, res.ap_iface);
     seqSelect.innerHTML = '<option value="">-- Select --</option>';
     if(Array.isArray(res.playlists) && res.playlists.length > 0){
       const grp = document.createElement("optgroup");
@@ -954,26 +959,25 @@ const optsBody = document.getElementById("optsBody");
 const apStatusLine = document.getElementById("apStatusLine");
 const apStatus = document.getElementById("apStatus");
 
-let _noWlan1 = false;
+let _noWlan = false;
 optsToggle.addEventListener("click", () => {
   const open = optsBody.classList.toggle("open");
   const arrow = open ? "&#9650;" : "&#9660;";
-  const warn = _noWlan1 ? " — <span style='color:var(--bad)'>No AP (wlan1 not detected)</span>" : "";
+  const warn = _noWlan ? " — <span style='color:var(--bad)'>No WiFi interface detected</span>" : "";
   optsToggle.innerHTML = arrow + " WiFi AP Settings" + warn;
 });
 
-// Show WiFi card — with warning if wlan1 absent
-// Called from loadSequences below
-function initWiFiCard(hasWlan1, currentSSID) {
+// Show WiFi card — with warning if no wlan interface
+function initWiFiCard(hasWlan, currentSSID, apIface) {
   optionsCard.style.display = "";
-  if (!hasWlan1) {
-    _noWlan1 = true;
-    optsToggle.innerHTML = "&#9660; WiFi AP Settings — <span style='color:var(--bad)'>No AP (wlan1 not detected)</span>";
-    apStatusLine.innerHTML = "<span style='color:var(--bad);font-weight:600'>No AP — wlan1 not detected. Settings saved here will apply when a USB WiFi adapter is connected.</span>";
+  if (!hasWlan) {
+    _noWlan = true;
+    optsToggle.innerHTML = "&#9660; WiFi AP Settings — <span style='color:var(--bad)'>No WiFi interface detected</span>";
+    apStatusLine.innerHTML = "<span style='color:var(--bad);font-weight:600'>No WiFi interface detected. Settings saved here will apply when an interface is available.</span>";
     return;
   }
+  if (apIface) document.getElementById("apIface").value = apIface;
   if (currentSSID) document.getElementById("newSSID").placeholder = currentSSID;
-  // Load full AP config
   loadAPConfig();
 }
 
@@ -981,10 +985,20 @@ async function loadAPConfig() {
   try {
     const res = await adminPost({ action: "get_ap_config" });
     if (!res.success) return;
+    if (res.ap_iface) {
+      document.getElementById("apIface").value = res.ap_iface;
+      document.getElementById("apIface").dataset.current = res.ap_iface;
+    }
     if (res.ssid) document.getElementById("newSSID").placeholder = res.ssid;
     if (res.ip) document.getElementById("newIP").placeholder = res.ip;
+    const sbsLabel = res.ap_iface === 'wlan0' ? ' (SBS)' : '';
     let statusHtml = "AP " + (res.service_active ? "active" : "inactive") +
+      " | " + esc(res.ap_iface || "?") + sbsLabel +
       " | SSID: " + esc(res.ssid || "?") + " | IP: " + esc(res.ip || "?");
+    if (res.ap_iface === 'wlan0' && res.tether_label) {
+      const tetherColor = res.tether_state === '2' ? 'var(--good, #4a4)' : 'var(--bad, #f44)';
+      statusHtml += ' | FPP tether: <span style="color:' + tetherColor + '">' + esc(res.tether_label) + '</span>';
+    }
     if (res.subnet_conflict) {
       statusHtml += '<div style="color:var(--bad);margin-top:6px;font-weight:600;">&#9888; ' + esc(res.subnet_conflict) + '</div>';
     }
@@ -1016,49 +1030,54 @@ function esc(s) { const d = document.createElement("div"); d.textContent = s; re
 
 document.getElementById("refreshClients").addEventListener("click", loadAPClients);
 
-document.getElementById("changeSSID").addEventListener("click", async () => {
+document.getElementById("applyAP").addEventListener("click", async () => {
+  const iface = document.getElementById("apIface").value;
   const ssid = document.getElementById("newSSID").value.trim();
-  if (!ssid || ssid.length < 1 || ssid.length > 32) {
+  const pass = document.getElementById("newPass").value;
+  const ip = document.getElementById("newIP").value.trim();
+
+  // Validate fields that have values
+  if (ssid && (ssid.length < 1 || ssid.length > 32)) {
     showStatus(apStatus, "SSID must be 1-32 characters", false); return;
   }
+  if (pass && (pass.length < 8 || pass.length > 63)) {
+    showStatus(apStatus, "Password must be 8-63 characters", false); return;
+  }
+  if (ip && !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+    showStatus(apStatus, "Enter a valid IPv4 address", false); return;
+  }
+
+  // Build confirm message
+  let changes = [];
+  if (iface === 'wlan0') changes.push("SBS mode (onboard WiFi) — FPP tether will be disabled");
+  if (ssid) changes.push("SSID: " + ssid);
+  if (pass) changes.push("Password: (changed)");
+  if (ip) changes.push("IP: " + ip);
+  if (changes.length === 0 && iface === document.getElementById("apIface").dataset.current) {
+    showStatus(apStatus, "No changes to apply", false); return;
+  }
+  const msg = "Save and restart AP?\n\n" + (changes.length ? changes.join("\n") : "Restart AP with current settings");
+  if (!confirm(msg)) return;
+
+  const btn = document.getElementById("applyAP");
+  btn.disabled = true; btn.textContent = "Saving...";
   try {
-    const res = await adminPost({ action: "change_ssid", ssid: ssid });
+    const res = await adminPost({
+      action: "save_ap_config",
+      iface: iface,
+      ssid: ssid || "",
+      password: pass || "",
+      ip: ip || ""
+    });
     showStatus(apStatus, res.success ? res.message : (res.error || "Failed"), res.success);
     if (res.success) {
-      document.getElementById("newSSID").placeholder = ssid;
       document.getElementById("newSSID").value = "";
+      document.getElementById("newPass").value = "";
+      document.getElementById("newIP").value = "";
       loadAPConfig();
     }
   } catch(e) { showStatus(apStatus, "Network error", false); }
-});
-
-document.getElementById("changePass").addEventListener("click", async () => {
-  const pass = document.getElementById("newPass").value;
-  if (pass.length < 8 || pass.length > 63) {
-    showStatus(apStatus, "Password must be 8-63 characters", false); return;
-  }
-  try {
-    const res = await adminPost({ action: "change_password", password: pass });
-    showStatus(apStatus, res.success ? res.message : (res.error || "Failed"), res.success);
-    if (res.success) document.getElementById("newPass").value = "";
-  } catch(e) { showStatus(apStatus, "Network error", false); }
-});
-
-document.getElementById("changeIP").addEventListener("click", async () => {
-  const ip = document.getElementById("newIP").value.trim();
-  if (!ip || !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
-    showStatus(apStatus, "Enter a valid IPv4 address", false); return;
-  }
-  // Warn the user that changing IP will disconnect them
-  if (!confirm("Changing the AP IP will disconnect you.\nNew address: http://" + ip + "/listen/\n\nContinue?")) return;
-  try {
-    const res = await adminPost({ action: "change_ip", ip: ip });
-    showStatus(apStatus, res.success ? res.message : (res.error || "Failed"), res.success);
-    if (res.success) {
-      document.getElementById("newIP").placeholder = ip;
-      document.getElementById("newIP").value = "";
-    }
-  } catch(e) { showStatus(apStatus, "Network error", false); }
+  btn.disabled = false; btn.textContent = "Save & Restart AP";
 });
 
 
