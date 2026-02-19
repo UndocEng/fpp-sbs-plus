@@ -39,11 +39,31 @@ if pgrep -f "listener-dnsmasq.conf" >/dev/null 2>&1; then
 fi
 sudo rm -f /tmp/listener-dnsmasq.conf
 
+# Kill SBS+ show AP processes
+if pgrep -f "hostapd-show.conf" >/dev/null 2>&1; then
+  sudo pkill -f "hostapd-show.conf" || true
+  echo "[uninstall] Stopped show AP hostapd"
+fi
+if pgrep -f "show-dnsmasq.conf" >/dev/null 2>&1; then
+  sudo pkill -f "show-dnsmasq.conf" || true
+  echo "[uninstall] Stopped show AP dnsmasq"
+fi
+sudo rm -f /tmp/show-dnsmasq.conf
+
+# Remove captive portal .htaccess deployed by show AP
+if [[ -n "$WEBROOT" ]] && [[ -f "$WEBROOT/.htaccess" ]]; then
+  sudo rm -f "$WEBROOT/.htaccess"
+  echo "[uninstall] Removed show AP .htaccess"
+fi
+
 # Clean up nftables rules and policy routing added by listener-ap
 echo "[uninstall] Cleaning up network routing rules..."
 sudo nft delete table inet listener_ap 2>/dev/null || true
+sudo nft delete table inet show_ap 2>/dev/null || true
 sudo ip rule del fwmark 0x64 table 100 2>/dev/null || true
 sudo ip route flush table 100 2>/dev/null || true
+sudo ip rule del fwmark 0xC8 table 200 2>/dev/null || true
+sudo ip route flush table 200 2>/dev/null || true
 echo "[uninstall] Network routing rules removed"
 
 # 2. Stop and disable ws-sync service

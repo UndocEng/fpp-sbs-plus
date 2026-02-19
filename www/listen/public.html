@@ -1,0 +1,793 @@
+<!doctype html>
+
+<html>
+
+<head>
+
+  <meta charset="utf-8" />
+
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+  <title>Show Audio</title>
+
+  <style>
+
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 18px; background: #111; color: #eee; }
+
+    .header { text-align: center; margin-bottom: 16px; }
+
+    .header img { width: 80px; height: 80px; }
+
+    .header h2 { margin: 8px 0 4px 0; color: #00e5ff; font-size: 36px; font-weight: 700; }
+
+    .small { opacity: .7; font-size: 14px; }
+
+    button { font-size: 22px; padding: 14px 18px; width: 100%; border: 2px solid #00e5ff; border-radius: 10px; background: #222; color: #00e5ff; cursor: pointer; }
+
+    button:disabled { opacity: 0.5; cursor: default; }
+
+    .idle-msg { text-align: center; margin-top: 24px; padding: 20px; border: 1px solid #333; border-radius: 10px; background: #1a1a1a; color: #888; font-size: 16px; }
+
+    .now-playing { text-align: center; margin-top: 16px; padding: 14px; border: 1px solid #00e5ff; border-radius: 10px; background: #0a1a1f; font-size: 18px; color: #00e5ff; }
+
+    .debug-toggle { margin-top: 16px; font-size: 13px; opacity: 0.5; }
+
+    .debug-toggle label { cursor: pointer; }
+
+    .box { margin-top: 8px; padding: 12px; border: 1px solid #333; border-radius: 10px; background: #1a1a1a; font-size: 13px; color: #aaa; }
+
+    .box b { color: #ccc; }
+
+    .err { color: #f44; font-weight: 600; }
+
+    .hidden { display: none; }
+
+    .footer { text-align: center; margin-top: 32px; font-size: 11px; opacity: 0.4; }
+
+  </style>
+
+</head>
+
+<body>
+
+  <div class="header">
+
+    <img src="logo-public.png" alt="Show Audio" />
+
+    <h2>Show Audio</h2>
+
+    <p class="small" style="font-size: 11px; opacity: 0.6; margin-top: -4px;" id="version">v...</p>
+
+    <p class="small">Tap once to enable audio. Keep this page open during the show.</p>
+
+  </div>
+
+  <button id="enableBtn">Enable Audio</button>
+
+  <div id="idleMsg" class="idle-msg">No show is currently broadcasting.</div>
+
+  <div id="nowPlaying" class="now-playing hidden">&#9835; Now Playing: <span id="trackName">-</span></div>
+
+  <div class="err" id="fetchErr"></div>
+
+  <div class="err" id="playErr"></div>
+
+  <div class="debug-toggle"><label><input type="checkbox" id="debugCheck" /> Debug</label> &nbsp; <label><input type="checkbox" id="logCheck" /> Client Log</label> &nbsp; <label><input type="checkbox" id="serverLogCheck" /> Server Log</label></div>
+
+  <div id="debugBox" class="box hidden">
+
+    <div><b>Transport:</b> <span id="transport">-</span></div>
+
+    <div><b>RTT:</b> <span id="rtt">-</span> ms</div>
+
+    <div><b>Clock Offset:</b> <span id="offset">-</span> ms</div>
+
+    <div><b>Sequence:</b> <span id="seq">-</span></div>
+
+    <div><b>State:</b> <span id="state">-</span></div>
+
+    <div><b>Target:</b> <span id="target">-</span> ms</div>
+
+    <div><b>Local:</b> <span id="local">-</span> ms</div>
+
+    <div><b>Error:</b> <span id="err">-</span> ms</div>
+
+    <div><b>PLL State:</b> <span id="pllState">idle</span></div>
+
+    <div><b>Rate:</b> <span id="pllRate">1.000</span>x</div>
+
+    <div><b>Avg Error (2s):</b> <span id="avgErr2s">-</span> ms</div>
+
+    <div><b>Avg Error (all):</b> <span id="avgErrAll">-</span> ms</div>
+
+    <div><b>Effective Rate:</b> <span id="effRate">-</span></div>
+
+    <div><b>Buffered:</b> <span id="buffered">-</span> s</div>
+
+    <div><b>Last Correction:</b> <span id="lastCorrection">-</span></div>
+
+    <div><b>Play Latency:</b> <span id="playLatency">0</span> ms</div>
+
+  </div>
+
+  <div id="logControls" class="hidden" style="margin-top:8px;text-align:right;">
+    <span id="logStatus" style="font-size:11px;color:#f90;margin-right:8px;"></span>
+    <button id="resumeLogBtn" style="font-size:12px;padding:4px 10px;width:auto;border:1px solid #555;background:#222;color:#aaa;display:none;">Resume Log</button>
+    <button id="copyLogBtn" style="font-size:12px;padding:4px 10px;width:auto;border:1px solid #555;background:#222;color:#aaa;">Copy Log</button>
+    <button id="clearLogBtn" style="font-size:12px;padding:4px 10px;width:auto;border:1px solid #555;background:#222;color:#aaa;">Clear Log</button>
+  </div>
+  <div id="logBox" class="box hidden" style="max-height:200px;overflow-y:auto;font-family:monospace;font-size:11px;white-space:pre-wrap;"></div>
+
+  <audio id="audio" preload="auto" playsinline></audio>
+
+  <div class="footer">Powered by FPP Eavesdrop SBS+</div>
+
+<script>
+
+// =============================================================================
+// FPP LISTENER SYNC CLIENT — Adaptive PLL Audio Synchronization (SBS+ Public)
+// =============================================================================
+
+// --- DOM References ---
+const enableBtn=document.getElementById('enableBtn'),
+audio=document.getElementById('audio'),
+idleMsg=document.getElementById('idleMsg'),
+nowPlaying=document.getElementById('nowPlaying'),
+trackName=document.getElementById('trackName'),
+pollEl=document.getElementById('transport'),
+fetchErrEl=document.getElementById('fetchErr'),
+playErrEl=document.getElementById('playErr'),
+seqEl=document.getElementById('seq'),
+stateEl=document.getElementById('state'),
+targetEl=document.getElementById('target'),
+localEl=document.getElementById('local'),
+errEl=document.getElementById('err'),
+pllStateEl=document.getElementById('pllState'),
+pllRateEl=document.getElementById('pllRate'),
+avgErr2sEl=document.getElementById('avgErr2s'),
+avgErrAllEl=document.getElementById('avgErrAll'),
+effRateEl=document.getElementById('effRate'),
+bufferedEl=document.getElementById('buffered'),
+lastCorrectionEl=document.getElementById('lastCorrection'),
+playLatencyEl=document.getElementById('playLatency'),
+rttEl=document.getElementById('rtt'),
+offsetEl=document.getElementById('offset'),
+debugCheck=document.getElementById('debugCheck'),
+debugBox=document.getElementById('debugBox');
+
+// --- Global State ---
+let enabled=false, currentBase="", pollTimer=null, haveMetadata=false, needInitialSeek=false, lastSeekMs=0, settleUntil=0, syncBusy=false;
+let logFrozen=false, wasPlaying=false;
+let pendingMsg=null, playAttempting=false;
+
+// --- WebSocket Transport ---
+const WS_RECONNECT_MS=2000;
+const WS_PING_INTERVAL_MS=1000;
+const HTTP_POLL_MS=250;
+
+let ws=null, wsConnected=false, wsPingTimer=null, wsReconnectTimer=null;
+
+// --- Clock Offset Estimation (NTP-style) ---
+let clockOffset=0, clockOffsetValid=false;
+const RTT_HISTORY_SIZE=5;
+const OFFSET_HISTORY_SIZE=8;
+const MIN_OFFSET_SAMPLES=3;
+let rttHistory=[];
+let offsetHistory=[];
+
+// --- Seek/Timing ---
+const LEAD_MS=2000;
+const SEEK_COOLDOWN_MS=2000;
+let awaitingStart=false;
+let scheduledStartTarget=0;
+let lastCorrectionMs=0;
+let logThrottle=0;
+let errHistoryAll=[];
+let errHistory2s=[];
+
+// --- PLL Constants ---
+const CAL_MIN_MS=800;
+const Kp_BASE=0.01;
+const Kp_SCALE=4;
+const MAX_ADJ=0.05;
+const DEAD_ZONE_MS=5;
+const LOG_SCALE_MS=100;
+const HARD_SEEK_S=2.0;
+const RATE_EMA=0.05;
+const MIN_RATE_CHANGE=0.003;
+
+// --- PLL State Machine ---
+const pll={phase:'idle',samples:[],baseRate:1.0,anchorLocalMs:0,anchorFppMs:0,lastRateUpdateMs:0};
+
+// --- Effective Rate Measurement ---
+let effRateWallMs=0, effRateLocalMs=0, lastEffRate=0;
+
+// --- Play-Ahead Latency Compensation ---
+const PLAY_LATENCY_KEY='fpp-play-latency';
+let playLatencyMs=0;
+let playCallWallMs=0;
+let playCallAudioPos=0;
+try{
+  const saved=localStorage.getItem(PLAY_LATENCY_KEY);
+  if(saved){const v=Number(saved);if(v>=0&&v<1000)playLatencyMs=v;}
+}catch(e){}
+
+// --- Utility Functions ---
+function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
+
+function pllReset(){
+  pll.phase='idle';pll.samples=[];pll.baseRate=1.0;pll.anchorLocalMs=0;pll.anchorFppMs=0;pll.lastRateUpdateMs=0;
+  if(audio)audio.playbackRate=1.0;
+}
+
+function linearSlope(samples){
+  if(samples.length<2)return 1.0;
+  const n=samples.length,first=samples[0];
+  let sumX=0,sumY=0,sumXX=0,sumXY=0;
+  for(let i=0;i<n;i++){
+    const x=samples[i].localMs-first.localMs;
+    const y=samples[i].fppMs-first.fppMs;
+    sumX+=x;sumY+=y;sumXX+=x*x;sumXY+=x*y;
+  }
+  const denom=n*sumXX-sumX*sumX;
+  if(Math.abs(denom)<1e-9)return 1.0;
+  return(n*sumXY-sumX*sumY)/denom;
+}
+
+// --- Client-Side Log ---
+const logBox=document.getElementById('logBox');
+const LOG_MAX=200;
+let logCount=0;
+const logCheck=document.getElementById('logCheck');
+function log(msg){
+  if(!logCheck.checked||logFrozen)return;
+  const t=new Date();
+  const ts=t.toTimeString().slice(0,8)+'.'+String(t.getMilliseconds()).padStart(3,'0');
+  const line=ts+' '+msg+'\n';
+  logBox.textContent+=line;
+  logCount++;
+  if(logCount>LOG_MAX){
+    const lines=logBox.textContent.split('\n');
+    logBox.textContent=lines.slice(-LOG_MAX).join('\n');
+    logCount=LOG_MAX;
+  }
+  logBox.scrollTop=logBox.scrollHeight;
+}
+
+// --- Server-Side Reporting ---
+const REPORT_INTERVAL_MS=1000;
+let lastReportMs=0;
+let lastRawPosMs=0, lastTargetMs=0, lastLocalMs=0;
+let lastAvg2s=0;
+const serverLogCheck=document.getElementById('serverLogCheck');
+function sendReport(event,errMs,rate){
+  if(!serverLogCheck.checked)return;
+  if(!ws||ws.readyState!==WebSocket.OPEN)return;
+  const now=Date.now();
+  const immediate=event==='START'||event==='CORRECTION'||event==='TRACK'||event==='INITIAL_SEEK'||event==='STOP';
+  if(!immediate&&(now-lastReportMs)<REPORT_INTERVAL_MS)return;
+  lastReportMs=now;
+  ws.send(JSON.stringify({
+    type:'report',
+    event:event,
+    fpp:Math.round(lastRawPosMs),
+    target:Math.round(lastTargetMs),
+    local:Math.round(lastLocalMs),
+    err:Math.round(errMs||0),
+    rate:Number((rate||1.0).toFixed(4)),
+    eff:Number((lastEffRate||0).toFixed(3)),
+    offset:Math.round(clockOffset),
+    avg2s:Math.round(lastAvg2s),
+    track:currentBase||''
+  }));
+}
+
+const logControls=document.getElementById('logControls');
+debugCheck.addEventListener('change',()=>{
+  debugBox.classList.toggle('hidden',!debugCheck.checked);
+});
+logCheck.addEventListener('change',()=>{
+  const show=logCheck.checked;
+  logBox.classList.toggle('hidden',!show);
+  logControls.classList.toggle('hidden',!show);
+});
+document.getElementById('copyLogBtn').onclick=()=>{
+  if(navigator.clipboard){navigator.clipboard.writeText(logBox.textContent).then(()=>{document.getElementById('copyLogBtn').textContent='Copied!';setTimeout(()=>{document.getElementById('copyLogBtn').textContent='Copy Log';},1500);});}
+};
+document.getElementById('clearLogBtn').onclick=()=>{logBox.textContent='';logCount=0;logFrozen=false;document.getElementById('logStatus').textContent='';document.getElementById('resumeLogBtn').style.display='none';};
+document.getElementById('resumeLogBtn').onclick=()=>{logFrozen=false;document.getElementById('logStatus').textContent='';document.getElementById('resumeLogBtn').style.display='none';log('--- LOG RESUMED ---');};
+audio.addEventListener('loadedmetadata',()=>{haveMetadata=true;log('METADATA loaded');});
+audio.addEventListener('error',()=>{playErrEl.textContent="No matching audio file detected";log('AUDIO ERROR');});
+
+// =============================================================================
+// CLOCK OFFSET ESTIMATION
+// =============================================================================
+
+function updateClockOffset(serverTs, clientSendTs, rtt){
+  const sample=serverTs-clientSendTs-(rtt/2);
+  offsetHistory.push(sample);
+  if(offsetHistory.length>OFFSET_HISTORY_SIZE)offsetHistory.shift();
+  const sorted=[...offsetHistory].sort((a,b)=>a-b);
+  const median=sorted[Math.floor(sorted.length/2)];
+  if(!clockOffsetValid){
+    clockOffset=median;
+    clockOffsetValid=true;
+  }else{
+    clockOffset=clockOffset*0.7+median*0.3;
+  }
+  offsetEl.textContent=Math.round(clockOffset);
+}
+
+// =============================================================================
+// WEBSOCKET CONNECTION
+// =============================================================================
+
+function connectWebSocket(){
+  if(ws&&(ws.readyState===WebSocket.CONNECTING||ws.readyState===WebSocket.OPEN))return;
+  const wsUrl='ws://'+location.hostname+'/ws';
+  try{ws=new WebSocket(wsUrl);}catch(e){startHttpFallback();return;}
+
+  ws.onopen=()=>{
+    wsConnected=true;
+    stopHttpPolling();
+    offsetHistory=[];
+    clockOffsetValid=false;
+    clockOffset=0;
+    pollEl.textContent='WebSocket connected';
+    fetchErrEl.textContent='';
+    sendPing();
+    setTimeout(sendPing,200);
+    setTimeout(sendPing,400);
+    setTimeout(sendPing,600);
+    setTimeout(sendPing,800);
+    if(wsPingTimer)clearInterval(wsPingTimer);
+    wsPingTimer=setInterval(sendPing,WS_PING_INTERVAL_MS);
+    log('WS CONNECTED, burst clock cal');
+  };
+
+  ws.onmessage=(event)=>{
+    try{
+      const data=JSON.parse(event.data);
+      if(data.type==='pong'){
+        handlePong(data);
+      }else if(data.state!==undefined){
+        sync(data);
+      }
+    }catch(e){}
+  };
+
+  ws.onclose=()=>{
+    log('WS DISCONNECTED, falling back to HTTP');
+    wsConnected=false;
+    if(wsPingTimer){clearInterval(wsPingTimer);wsPingTimer=null;}
+    pollEl.textContent='WS disconnected, HTTP fallback';
+    startHttpFallback();
+    if(wsReconnectTimer)clearTimeout(wsReconnectTimer);
+    wsReconnectTimer=setTimeout(connectWebSocket,WS_RECONNECT_MS);
+  };
+
+  ws.onerror=()=>{};
+}
+
+function sendPing(){
+  if(ws&&ws.readyState===WebSocket.OPEN){
+    ws.send(JSON.stringify({type:'ping',client_ts:Date.now()}));
+  }
+}
+
+function handlePong(data){
+  const now=Date.now();
+  const clientTs=data.client_ts;
+  const serverTs=data.server_ts;
+  const rtt=now-clientTs;
+  if(rtt>0&&rtt<500){
+    rttHistory.push(rtt);
+    if(rttHistory.length>RTT_HISTORY_SIZE)rttHistory.shift();
+    rttEl.textContent=rtt;
+    updateClockOffset(serverTs,clientTs,rtt);
+    log('PONG rtt='+rtt+'ms offset='+Math.round(clockOffset)+'ms');
+  }else{
+    log('PONG REJECTED rtt='+rtt+'ms (out of range)');
+  }
+}
+
+// =============================================================================
+// HTTP FALLBACK POLLING
+// =============================================================================
+
+function startHttpFallback(){
+  if(pollTimer)return;
+  pollTimer=setInterval(pollOnce,HTTP_POLL_MS);
+  pollOnce();
+}
+
+function stopHttpPolling(){
+  if(pollTimer){clearInterval(pollTimer);pollTimer=null;}
+}
+
+async function pollOnce(){
+  if(!enabled)return;
+  const t0=Date.now();
+  try{
+    const url=location.origin+'/listen/status.php?ts='+Date.now();
+    const r=await fetch(url,{cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const msg=await r.json();
+    const t1=Date.now();
+    const rtt=t1-t0;
+    if(!wsConnected)pollEl.textContent='HTTP ok ('+rtt+' ms)';
+    fetchErrEl.textContent='';
+    if(msg.server_ms&&rtt>0&&rtt<500){
+      updateClockOffset(msg.server_ms,t0,rtt);
+      if(!wsConnected)rttEl.textContent=rtt;
+    }
+    sync(msg);
+  }catch(e){
+    if(!wsConnected)pollEl.textContent='HTTP FAILED';
+    fetchErrEl.textContent='Fetch error: '+(e?.message||e);
+  }
+}
+
+// =============================================================================
+// AUDIO PLAYBACK HELPERS
+// =============================================================================
+
+async function safePlay(){
+  try{
+    const p=audio.play();
+    if(p&&typeof p.catch==='function'){await p;}
+    playErrEl.textContent='';
+  }catch(e){
+    playErrEl.textContent='Audio playback blocked: '+(e?.message||e);
+  }
+}
+
+// =============================================================================
+// ENABLE BUTTON
+// =============================================================================
+
+enableBtn.onclick=()=>{
+  enabled=true;
+  enableBtn.disabled=true;
+  enableBtn.textContent='Audio Enabled';
+  pollEl.textContent='Connecting...';
+  connectWebSocket();
+  startHttpFallback();
+  try{
+    audio.muted=true;
+    const p=audio.play();
+    if(p&&typeof p.then==='function'){
+      p.then(()=>{audio.pause();audio.currentTime=0;audio.muted=false;})
+      .catch(()=>{audio.muted=false;});
+    }else{audio.muted=false;}
+  }catch(e){audio.muted=false;}
+};
+
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&enabled&&!wsConnected){
+    connectWebSocket();
+  }
+});
+
+function beginScheduledStart(targetSec){
+  const leadSec=LEAD_MS/1000;
+  const seekTo=clamp(targetSec+leadSec,0,audio.duration-0.05);
+  audio.pause();
+  audio.currentTime=seekTo;
+  const onSeeked=()=>{
+    audio.removeEventListener('seeked',onSeeked);
+    scheduledStartTarget=audio.currentTime;
+    awaitingStart=true;
+    log('SCHEDULED seek landed='+Math.round(scheduledStartTarget*1000)+'ms (target was '+Math.round(seekTo*1000)+'ms)');
+  };
+  audio.addEventListener('seeked',onSeeked);
+}
+
+// =============================================================================
+// SYNC ALGORITHM
+// =============================================================================
+
+async function sync(msg){
+  pendingMsg=msg;
+  if(syncBusy)return;
+  syncBusy=true;
+  try{
+    while(pendingMsg){
+      const m=pendingMsg;
+      pendingMsg=null;
+      await syncInner(m);
+    }
+  }finally{syncBusy=false;}
+}
+
+async function syncInner(msg){
+  seqEl.textContent=msg.base||'-';
+  stateEl.textContent=msg.state||'-';
+  targetEl.textContent=msg.pos_ms??'-';
+
+  if(msg.state==='stop'||!msg.base){
+    idleMsg.classList.remove('hidden');
+    nowPlaying.classList.add('hidden');
+    playErrEl.textContent='';
+  }else{
+    idleMsg.classList.add('hidden');
+    nowPlaying.classList.remove('hidden');
+    trackName.textContent=msg.base;
+  }
+
+  if(msg.base&&msg.base!==currentBase){
+    logBox.textContent='';logCount=0;logFrozen=false;
+    document.getElementById('logStatus').textContent='';
+    document.getElementById('resumeLogBtn').style.display='none';
+    log('TRACK CHANGE: '+msg.base+' src='+msg.mp3_url);
+    sendReport('TRACK',0,1.0);
+    currentBase=msg.base;
+    haveMetadata=false;
+    needInitialSeek=true;
+    awaitingStart=false;
+    audio.playbackRate=1.0;
+    audio.src=msg.mp3_url||'';
+    audio.load();
+    pllReset();
+    errHistoryAll=[];errHistory2s=[];
+    effRateWallMs=0;
+  }
+
+  if(msg.state==='stop'){
+    if(wasPlaying){
+      log('STATE: stop');
+      sendReport('STOP',0,1.0);
+      if(logCheck.checked){
+        logFrozen=true;
+        document.getElementById('logStatus').textContent='Log frozen (song ended)';
+        document.getElementById('resumeLogBtn').style.display='';
+      }
+    }
+    audio.pause();
+    audio.currentTime=0;
+    audio.playbackRate=1.0;
+    pllReset();
+    errHistoryAll=[];errHistory2s=[];
+    needInitialSeek=false;
+    awaitingStart=false;
+    wasPlaying=false;
+    return;
+  }
+
+  if(msg.state==='pause'){
+    log('STATE: pause');
+    audio.pause();
+    audio.playbackRate=1.0;
+    pllReset();
+    errHistoryAll=[];errHistory2s=[];
+    needInitialSeek=false;
+    awaitingStart=false;
+    return;
+  }
+
+  wasPlaying=true;
+
+  const nowMs=Date.now();
+  const serverMs=Number(msg.server_ms);
+  const rawPosMs=Number(msg.pos_ms||0);
+
+  let targetMs=rawPosMs;
+  const serverOk=Number.isFinite(serverMs)&&serverMs>1e12&&Math.abs(nowMs-serverMs)<300000;
+  if(serverOk){
+    let elapsed;
+    if(clockOffsetValid){
+      elapsed=(nowMs+clockOffset)-serverMs;
+    }else{
+      elapsed=nowMs-serverMs;
+    }
+    if(!Number.isFinite(elapsed))elapsed=0;
+    elapsed=clamp(elapsed,0,300);
+    targetMs=rawPosMs+elapsed;
+  }else{
+    log('SERVER_MS INVALID: '+serverMs+' nowMs='+nowMs+' diff='+Math.abs(nowMs-serverMs));
+  }
+
+  const targetSec=targetMs/1000.0;
+  const localSec=audio.currentTime||0;
+  const errMs=(targetSec-localSec)*1000.0;
+
+  lastRawPosMs=rawPosMs;
+  lastTargetMs=targetMs;
+  lastLocalMs=localSec*1000;
+
+  localEl.textContent=Math.round(localSec*1000);
+  targetEl.textContent=Math.round(targetMs);
+
+  if(lastCorrectionMs>0){
+    const ago=Math.round((nowMs-lastCorrectionMs)/1000);
+    lastCorrectionEl.textContent=ago+'s ago';
+  }
+  playLatencyEl.textContent=Math.round(playLatencyMs);
+
+  if(offsetHistory.length<MIN_OFFSET_SAMPLES){
+    errEl.textContent='(clock cal '+offsetHistory.length+'/'+MIN_OFFSET_SAMPLES+')';
+    if(++logThrottle%10===0)log('CLOCK CAL: '+offsetHistory.length+'/'+MIN_OFFSET_SAMPLES+' offset samples');
+    return;
+  }
+
+  if(needInitialSeek&&haveMetadata){
+    needInitialSeek=false;
+    audio.currentTime=clamp(targetSec,0,Math.max(0,audio.duration-0.1));
+    log('PLAY NOW: seek to '+Math.round(targetSec*1000)+'ms, PLL will converge after settle');
+    sendReport('INITIAL_SEEK',errMs,1.0);
+    settleUntil=nowMs+1500;
+    effRateWallMs=nowMs;
+    effRateLocalMs=targetSec*1000;
+    playCallWallMs=Date.now();
+    playCallAudioPos=audio.currentTime;
+    playAttempting=true;
+    safePlay().finally(()=>{playAttempting=false;});
+    sendReport('START',0,1.0);
+    return;
+  }
+
+  if(needInitialSeek){
+    return;
+  }
+
+  if(nowMs<settleUntil){
+    if(playCallWallMs>0&&audio.currentTime!==playCallAudioPos){
+      const measuredMs=Date.now()-playCallWallMs;
+      playLatencyMs=playLatencyMs>0?(playLatencyMs*0.5+measuredMs*0.5):measuredMs;
+      playLatencyMs=clamp(playLatencyMs,0,500);
+      log('PLAY_LATENCY measured='+measuredMs+'ms estimate='+Math.round(playLatencyMs)+'ms');
+      try{localStorage.setItem(PLAY_LATENCY_KEY,Math.round(playLatencyMs).toString());}catch(e){}
+      playCallWallMs=0;
+    }
+    const sLocalMs=performance.now();
+    const sFppMs=targetMs;
+    if(pll.phase==='idle'){
+      pll.phase='calibrating';
+      pll.samples=[{localMs:sLocalMs,fppMs:sFppMs}];
+      pllStateEl.textContent='calibrating';
+      log('PLL: calibrating during settle');
+    }else if(pll.phase==='calibrating'){
+      pll.samples.push({localMs:sLocalMs,fppMs:sFppMs});
+      pllStateEl.textContent='cal '+pll.samples.length;
+    }
+    errEl.textContent='(settling)';
+    if(++logThrottle%10===0)log('SETTLE remaining='+(settleUntil-nowMs)+'ms samples='+pll.samples.length);
+    return;
+  }
+
+  if(audio.paused&&!playAttempting){
+    log('PLAY resuming (was paused)');
+    playAttempting=true;
+    safePlay().finally(()=>{playAttempting=false;});
+  }
+
+  errEl.textContent=Math.round(errMs);
+
+  errHistoryAll.push(errMs);
+  if(errHistoryAll.length>100)errHistoryAll.shift();
+  const avgAll=errHistoryAll.length>0?(errHistoryAll.reduce((a,b)=>a+b,0)/errHistoryAll.length):0;
+  avgErrAllEl.textContent=Math.round(avgAll);
+
+  errHistory2s.push({t:nowMs,err:errMs});
+  while(errHistory2s.length>0&&(nowMs-errHistory2s[0].t)>2000)errHistory2s.shift();
+  const avg2s=errHistory2s.length>0?(errHistory2s.reduce((a,b)=>a+b.err,0)/errHistory2s.length):0;
+  lastAvg2s=avg2s;
+  avgErr2sEl.textContent=Math.round(avg2s);
+
+  let bufferedSec=0;
+  if(audio.buffered.length>0){bufferedSec=audio.buffered.end(audio.buffered.length-1)-localSec;}
+  bufferedEl.textContent=bufferedSec.toFixed(1);
+
+  if(!haveMetadata||!Number.isFinite(audio.duration)||audio.duration<=0){
+    return;
+  }
+
+  if(effRateWallMs>0){
+    const dWall=nowMs-effRateWallMs;
+    const dLocal=(localSec*1000)-effRateLocalMs;
+    if(dWall>1000){
+      lastEffRate=dLocal/dWall;
+      effRateEl.textContent=lastEffRate.toFixed(4);
+      effRateWallMs=nowMs;
+      effRateLocalMs=localSec*1000;
+    }
+  }else{
+    effRateWallMs=nowMs;
+    effRateLocalMs=localSec*1000;
+  }
+
+  const localMs=performance.now();
+  const fppMs=targetMs;
+
+  if(pll.phase==='idle'){
+    pll.phase='calibrating';
+    pll.samples=[{localMs,fppMs}];
+    audio.playbackRate=1.0;
+    pllStateEl.textContent='calibrating';
+    pllRateEl.textContent='1.000';
+    log('PLL: calibrating (need '+CAL_MIN_MS+'ms window)');
+    sendReport('SYNC',errMs,1.0);
+    return;
+  }
+
+  if(pll.phase==='calibrating'){
+    pll.samples.push({localMs,fppMs});
+    const calSpanMs=pll.samples.length>1?(pll.samples[pll.samples.length-1].localMs-pll.samples[0].localMs):0;
+    pllStateEl.textContent='cal '+Math.round(calSpanMs)+'ms';
+    pllRateEl.textContent='1.000';
+    errEl.textContent=Math.round(errMs)+' (cal)';
+    if(calSpanMs>=CAL_MIN_MS&&pll.samples.length>=6){
+      pll.baseRate=linearSlope(pll.samples);
+      if(pll.baseRate<0.99||pll.baseRate>1.01)pll.baseRate=1.0;
+      pll.phase='locked';
+      pll.anchorLocalMs=localMs;
+      pll.anchorFppMs=fppMs;
+      audio.playbackRate=pll.baseRate;
+      pllStateEl.textContent='locked';
+      log('PLL: locked baseRate='+pll.baseRate.toFixed(4)+' err='+Math.round(errMs)+'ms from '+pll.samples.length+' samples over '+Math.round(calSpanMs)+'ms');
+    }
+    sendReport('SYNC',errMs,audio.playbackRate);
+    return;
+  }
+
+  const phaseErr=targetSec-localSec;
+  pllStateEl.textContent='locked';
+
+  if(Math.abs(phaseErr)>HARD_SEEK_S&&(nowMs-lastSeekMs)>SEEK_COOLDOWN_MS){
+    log('PLL: HARD SEEK err='+Math.round(phaseErr*1000)+'ms (staying locked)');
+    sendReport('CORRECTION',phaseErr*1000,audio.playbackRate);
+    audio.currentTime=clamp(targetSec,0,Math.max(0,audio.duration-0.1));
+    lastSeekMs=nowMs;
+    lastCorrectionMs=nowMs;
+    pll.anchorLocalMs=localMs;
+    pll.anchorFppMs=fppMs;
+    errHistoryAll=[];errHistory2s=[];
+    if(audio.paused&&!playAttempting){
+      playAttempting=true;
+      safePlay().finally(()=>{playAttempting=false;});
+    }
+    return;
+  }
+
+  const absAvg2s=Math.abs(lastAvg2s);
+  const Kp=Kp_BASE*(1+Kp_SCALE*Math.min(absAvg2s/200,1));
+  const rateInterval=absAvg2s>50?500:1000;
+  pllStateEl.textContent='locked Kp='+Kp.toFixed(3);
+
+  if((nowMs-pll.lastRateUpdateMs)>=rateInterval){
+    pll.lastRateUpdateMs=nowMs;
+    let rate=pll.baseRate;
+    if(absAvg2s>DEAD_ZONE_MS){
+      rate=pll.baseRate+Math.sign(lastAvg2s)*Kp*Math.log1p((absAvg2s-DEAD_ZONE_MS)/LOG_SCALE_MS);
+    }
+    rate=clamp(rate,1-MAX_ADJ,1+MAX_ADJ);
+    if(Math.abs(rate-audio.playbackRate)>MIN_RATE_CHANGE){
+      audio.playbackRate=rate;
+    }
+  }
+  pllRateEl.textContent=audio.playbackRate.toFixed(3);
+
+  const dtLocal=localMs-pll.anchorLocalMs;
+  if(dtLocal>2000){
+    const dtFpp=fppMs-pll.anchorFppMs;
+    const instRate=dtFpp/dtLocal;
+    if(instRate>0.95&&instRate<1.05){
+      pll.baseRate=pll.baseRate*(1-RATE_EMA)+instRate*RATE_EMA;
+    }
+    pll.anchorLocalMs=localMs;
+    pll.anchorFppMs=fppMs;
+  }
+
+  sendReport('SYNC',errMs,audio.playbackRate);
+
+  if(++logThrottle%20===0)log('PLL err='+Math.round(phaseErr*1000)+'ms rate='+audio.playbackRate.toFixed(3)+'x base='+pll.baseRate.toFixed(4));
+}
+
+// Fetch and display version
+fetch('/listen/version.php?t='+Date.now()).then(r=>r.text()).then(v=>document.getElementById('version').textContent='v'+v.trim()).catch(()=>{});
+
+</script>
+
+</body>
+
+</html>

@@ -51,6 +51,19 @@ switch ($action) {
   case 'get_ap_clients':
     echo json_encode(getAPClients());
     break;
+  case 'get_show_ap_config':
+    echo json_encode(getShowAPConfig());
+    break;
+  case 'save_show_ap_config':
+    echo json_encode(saveShowAPConfig(
+      $_POST['enabled'] ?? '0',
+      $_POST['ssid'] ?? '',
+      $_POST['ip'] ?? ''
+    ));
+    break;
+  case 'get_show_ap_clients':
+    echo json_encode(getShowAPClients());
+    break;
   default:
     echo json_encode(["success" => false, "error" => "Unknown action"]);
 }
@@ -241,6 +254,155 @@ function getAPConfig() {
   $result["tether_label"] = isset($tetherLabels[$tetherState]) ? $tetherLabels[$tetherState] : "unknown";
 
   return $result;
+}
+
+
+// ── SBS+ Show AP ──────────────────────────────────────────────────
+
+function getShowAPConfig() {
+  $apIface = getAPInterface();
+  $showIface = ($apIface === 'wlan0') ? 'wlan1' : 'wlan0';
+  $hasShowIface = file_exists('/sys/class/net/' . $showIface);
+
+  $result = [
+    "success" => true,
+    "enabled" => false,
+    "ssid" => "SHOW_AUDIO",
+    "ip" => "192.168.60.1",
+    "mask" => "24",
+    "show_iface" => $showIface,
+    "has_show_iface" => $hasShowIface,
+    "running" => false,
+    "ap_iface" => $apIface
+  ];
+
+  // Read show AP config from ap.conf
+  $apConf = "/home/fpp/listen-sync/ap.conf";
+  if (file_exists($apConf)) {
+    $lines = file($apConf, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if ($lines !== false) {
+      foreach ($lines as $line) {
+        $line = trim($line);
+        if ($line === '' || $line[0] === '#') continue;
+        if (strpos($line, 'SHOW_AP_ENABLED=') === 0) {
+          $result["enabled"] = (substr($line, 16) === '1');
+        }
+        if (strpos($line, 'SHOW_AP_SSID=') === 0) {
+          $result["ssid"] = substr($line, 13);
+        }
+        if (strpos($line, 'SHOW_AP_IP=') === 0) {
+          $result["ip"] = substr($line, 11);
+        }
+        if (strpos($line, 'SHOW_AP_MASK=') === 0) {
+          $result["mask"] = substr($line, 13);
+        }
+      }
+    }
+  }
+
+  // Check if show AP hostapd is running
+  exec("pgrep -f hostapd-show.conf 2>/dev/null", $out, $ret);
+  $result["running"] = ($ret === 0);
+
+  return $result;
+}
+
+
+function saveShowAPConfig($enabled, $ssid, $ip) {
+  $enabled = ($enabled === '1' || $enabled === 'true') ? '1' : '0';
+  $ssid = trim($ssid);
+  $ip = trim($ip);
+
+  // Validate SSID if provided
+  if ($ssid !== '') {
+    if (strlen($ssid) < 1 || strlen($ssid) > 32) {
+      return ["success" => false, "error" => "SSID must be 1-32 characters"];
+    }
+    if (!preg_match('/^[a-zA-Z0-9 _\-]+$/', $ssid)) {
+      return ["success" => false, "error" => "SSID can only contain letters, numbers, spaces, hyphens, underscores"];
+    }
+  }
+
+  // Validate IP if provided
+  if ($ip !== '') {
+    if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+      return ["success" => false, "error" => "Invalid IPv4 address"];
+    }
+    $parts = explode('.', $ip);
+    if ($parts[0] === '0' || $parts[0] === '127' || intval($parts[0]) >= 224) {
+      return ["success" => false, "error" => "Reserved IP address"];
+    }
+  }
+
+  // Update ap.conf (preserve all existing lines, update show AP fields)
+  $apConf = "/home/fpp/listen-sync/ap.conf";
+  $lines = @file($apConf, FILE_IGNORE_NEW_LINES);
+  $newLines = [];
+  $foundEnabled = false;
+  $foundSSID = false;
+  $foundIP = false;
+
+  if ($lines !== false) {
+    foreach ($lines as $line) {
+      $trimmed = trim($line);
+      if (strpos($trimmed, 'SHOW_AP_ENABLED=') === 0) {
+        $newLines[] = "SHOW_AP_ENABLED=" . $enabled;
+        $foundEnabled = true;
+      } elseif ($ssid !== '' && strpos($trimmed, 'SHOW_AP_SSID=') === 0) {
+        $newLines[] = "SHOW_AP_SSID=" . $ssid;
+        $foundSSID = true;
+      } elseif ($ip !== '' && strpos($trimmed, 'SHOW_AP_IP=') === 0) {
+        $newLines[] = "SHOW_AP_IP=" . $ip;
+        $foundIP = true;
+      } else {
+        $newLines[] = $line;
+      }
+    }
+  }
+
+  if (!$foundEnabled) $newLines[] = "SHOW_AP_ENABLED=" . $enabled;
+  if ($ssid !== '' && !$foundSSID) $newLines[] = "SHOW_AP_SSID=" . $ssid;
+  if ($ip !== '' && !$foundIP) $newLines[] = "SHOW_AP_IP=" . $ip;
+
+  $content = implode("\n", $newLines) . "\n";
+  $tmpFile = tempnam(sys_get_temp_dir(), 'apconf_');
+  file_put_contents($tmpFile, $content);
+  exec("sudo /usr/bin/tee /home/fpp/listen-sync/ap.conf < " . escapeshellarg($tmpFile) . " > /dev/null 2>&1", $out, $ret);
+  unlink($tmpFile);
+  if ($ret !== 0) {
+    return ["success" => false, "error" => "Failed to write AP config"];
+  }
+
+  // Update hostapd-show.conf SSID if changed
+  if ($ssid !== '') {
+    $showHostapd = "/home/fpp/listen-sync/hostapd-show.conf";
+    $hLines = @file($showHostapd, FILE_IGNORE_NEW_LINES);
+    if ($hLines !== false) {
+      $hNewLines = [];
+      foreach ($hLines as $line) {
+        if (strpos($line, 'ssid=') === 0) {
+          $hNewLines[] = "ssid=" . $ssid;
+        } else {
+          $hNewLines[] = $line;
+        }
+      }
+      $hContent = implode("\n", $hNewLines) . "\n";
+      $tmpFile2 = tempnam(sys_get_temp_dir(), 'hostapd_');
+      file_put_contents($tmpFile2, $hContent);
+      exec("sudo /usr/bin/tee /home/fpp/listen-sync/hostapd-show.conf < " . escapeshellarg($tmpFile2) . " > /dev/null 2>&1", $out2, $ret2);
+      unlink($tmpFile2);
+    }
+  }
+
+  // Restart service
+  exec("sudo /usr/bin/systemctl restart listener-ap.service 2>&1", $out3, $ret3);
+
+  $msg = $enabled === '1' ? "Show AP enabled" : "Show AP disabled";
+  $msg .= ". Service restarting.";
+  if ($ssid !== '') $msg .= " SSID: " . $ssid . ".";
+  if ($ip !== '') $msg .= " IP: " . $ip . ".";
+
+  return ["success" => true, "message" => $msg];
 }
 
 
@@ -632,10 +794,9 @@ function changeInterface($newIface) {
 
 // ── AP Connected Clients ─────────────────────────────────────────────
 
-function getAPClients() {
-  $iface = getAPInterface();
+function getClientsForInterface($iface) {
   if (!file_exists('/sys/class/net/' . $iface)) {
-    return ["success" => true, "clients" => [], "count" => 0];
+    return [];
   }
 
   $clients = [];
@@ -677,5 +838,18 @@ function getAPClients() {
     }
   }
 
+  return $clients;
+}
+
+function getAPClients() {
+  $iface = getAPInterface();
+  $clients = getClientsForInterface($iface);
+  return ["success" => true, "clients" => $clients, "count" => count($clients)];
+}
+
+function getShowAPClients() {
+  $apIface = getAPInterface();
+  $showIface = ($apIface === 'wlan0') ? 'wlan1' : 'wlan0';
+  $clients = getClientsForInterface($showIface);
   return ["success" => true, "clients" => $clients, "count" => count($clients)];
 }

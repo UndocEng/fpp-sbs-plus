@@ -33,6 +33,10 @@ sudo cp -f "$ROOT_DIR/www/listen/status.php" "$WEBROOT/listen/status.php"
 sudo cp -f "$ROOT_DIR/www/listen/admin.php" "$WEBROOT/listen/admin.php"
 sudo cp -f "$ROOT_DIR/www/listen/version.php" "$WEBROOT/listen/version.php"
 sudo cp -f "$ROOT_DIR/www/listen/logo.png" "$WEBROOT/listen/logo.png" 2>/dev/null || true
+sudo cp -f "$ROOT_DIR/www/listen/logo-public.png" "$WEBROOT/listen/logo-public.png" 2>/dev/null || true
+sudo cp -f "$ROOT_DIR/www/listen/public.html" "$WEBROOT/listen/public.html" 2>/dev/null || true
+sudo cp -f "$ROOT_DIR/www/listen/portal-api.php" "$WEBROOT/listen/portal-api.php" 2>/dev/null || true
+sudo cp -f "$ROOT_DIR/www/listen/detect.php" "$WEBROOT/listen/detect.php" 2>/dev/null || true
 sudo cp -f "$ROOT_DIR/VERSION" "$WEBROOT/listen/VERSION" 2>/dev/null || true
 
 # Create index.html redirect if listen.html exists
@@ -85,23 +89,42 @@ sudo systemctl unmask hostapd 2>/dev/null || true
 AP_CONF="$LISTEN_SYNC/ap.conf"
 if [[ ! -f "$AP_CONF" ]]; then
   sudo tee "$AP_CONF" > /dev/null <<'EOF'
-# AP Configuration for FPP Eavesdrop
+# AP Configuration for FPP Eavesdrop SBS+
 # Edit via web UI or manually. Changes take effect on service restart.
-WLAN_IF=wlan1
+WLAN_IF=wlan0
 AP_IP=192.168.50.1
 AP_MASK=24
+
+# SBS+ Show AP (public listener on opposite interface)
+SHOW_AP_ENABLED=0
+SHOW_AP_SSID=SHOW_AUDIO
+SHOW_AP_IP=192.168.60.1
+SHOW_AP_MASK=24
 EOF
   sudo chmod 644 "$AP_CONF"
-  echo "[install] Default AP config created (IP: 192.168.50.1)"
+  echo "[install] Default AP config created (SBS mode, wlan0, IP: 192.168.50.1)"
 else
+  # Migrate: add show AP fields if missing from existing config
+  if ! grep -q 'SHOW_AP_ENABLED' "$AP_CONF" 2>/dev/null; then
+    echo "[install] Adding SBS+ fields to existing ap.conf..."
+    sudo tee -a "$AP_CONF" > /dev/null <<'EOF'
+
+# SBS+ Show AP (public listener on opposite interface)
+SHOW_AP_ENABLED=0
+SHOW_AP_SSID=SHOW_AUDIO
+SHOW_AP_IP=192.168.60.1
+SHOW_AP_MASK=24
+EOF
+    echo "[install] SBS+ fields added to ap.conf"
+  fi
   echo "[install] AP config exists, keeping current settings"
 fi
 
 # Read configured interface from ap.conf
-WLAN_IF="wlan1"
+WLAN_IF="wlan0"
 if [[ -f "$AP_CONF" ]]; then
   source "$AP_CONF"
-  WLAN_IF="${WLAN_IF:-wlan1}"
+  WLAN_IF="${WLAN_IF:-wlan0}"
 fi
 
 # Deploy default hostapd config with WPA2 (if not already present)
@@ -110,7 +133,7 @@ if [[ ! -f "$HOSTAPD_CONF" ]]; then
   sudo tee "$HOSTAPD_CONF" > /dev/null <<EOF
 interface=$WLAN_IF
 driver=nl80211
-ssid=SHOW_AUDIO
+ssid=EAVESDROP
 hw_mode=g
 channel=6
 country_code=US
@@ -133,12 +156,27 @@ else
   echo "[install] Hostapd config exists, keeping current settings"
 fi
 
+# Deploy default show AP hostapd config (if not already present)
+SHOW_HOSTAPD="$LISTEN_SYNC/hostapd-show.conf"
+if [[ ! -f "$SHOW_HOSTAPD" ]]; then
+  sudo cp -f "$ROOT_DIR/config/hostapd-show.conf" "$SHOW_HOSTAPD"
+  sudo chmod 644 "$SHOW_HOSTAPD"
+  echo "[install] Default show AP hostapd config deployed"
+else
+  echo "[install] Show AP hostapd config exists, keeping current settings"
+fi
+
+# Deploy .htaccess-show template (always update — template, not user config)
+sudo cp -f "$ROOT_DIR/www/.htaccess-show" "$LISTEN_SYNC/htaccess-show.template"
+echo "[install] .htaccess-show template deployed"
+
 # Configure sudoers for www-data (admin.php WiFi management)
 echo "[install] Configuring sudoers..."
 SUDOERS_FILE="/etc/sudoers.d/listener-sync"
 sudo tee "$SUDOERS_FILE" > /dev/null <<'EOF'
 # Allow www-data to manage listener AP config and service
 www-data ALL=(ALL) NOPASSWD: /usr/bin/tee /home/fpp/listen-sync/hostapd-listener.conf
+www-data ALL=(ALL) NOPASSWD: /usr/bin/tee /home/fpp/listen-sync/hostapd-show.conf
 www-data ALL=(ALL) NOPASSWD: /usr/bin/tee /home/fpp/listen-sync/ap.conf
 www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart listener-ap.service
 www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop hostapd
@@ -341,8 +379,11 @@ LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 if [[ -z "$LOCAL_IP" ]]; then
   LOCAL_IP="YOUR_FPP_IP"
 fi
-AP_SSID=$(grep '^ssid=' "$LISTEN_SYNC/hostapd-listener.conf" 2>/dev/null | cut -d= -f2 || echo "SHOW_AUDIO")
+AP_SSID=$(grep '^ssid=' "$LISTEN_SYNC/hostapd-listener.conf" 2>/dev/null | cut -d= -f2 || echo "EAVESDROP")
 AP_IP=$(grep '^AP_IP=' "$LISTEN_SYNC/ap.conf" 2>/dev/null | cut -d= -f2 || echo "192.168.50.1")
+SHOW_ENABLED=$(grep '^SHOW_AP_ENABLED=' "$LISTEN_SYNC/ap.conf" 2>/dev/null | cut -d= -f2 || echo "0")
+SHOW_SSID=$(grep '^SHOW_AP_SSID=' "$LISTEN_SYNC/ap.conf" 2>/dev/null | cut -d= -f2 || echo "SHOW_AUDIO")
+SHOW_IP=$(grep '^SHOW_AP_IP=' "$LISTEN_SYNC/ap.conf" 2>/dev/null | cut -d= -f2 || echo "192.168.60.1")
 
 echo ""
 echo "========================================="
@@ -356,6 +397,12 @@ SBS_NOTE=""
 echo "  WiFi:  ${AP_SSID} (WPA2) on ${WLAN_IF}${SBS_NOTE}"
 echo "  AP IP: ${AP_IP}"
 echo "  Pass:  Listen123 (change via web UI)"
+fi
+if [[ "$SHOW_ENABLED" == "1" ]]; then
+  echo "  SBS+:  ${SHOW_SSID} (open) on ${SHOW_IF:-wlan1}"
+  echo "         Public page: http://${SHOW_IP}/listen/public.html"
+else
+  echo "  SBS+:  Disabled (enable via web UI)"
 fi
 echo "========================================="
 if [[ "$TESTS_OK" != "true" ]]; then

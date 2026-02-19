@@ -172,6 +172,38 @@
     </div>
   </div>
 
+  <!-- SBS+ Show AP Settings -- shown when eavesdrop is on wlan0 -->
+  <div class="card" id="showAPCard" style="display:none;">
+    <div class="opts-toggle" id="showAPToggle">&#9660; SBS+ Public Listener AP</div>
+    <div class="opts-body" id="showAPBody">
+      <div id="showAPStatusLine" style="font-size:13px;color:var(--muted);margin-bottom:8px;"></div>
+      <div class="field-group">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" id="showAPEnabled" style="width:18px;height:18px;" />
+          <span style="font-size:15px;">Enable SBS+ (Public Listener AP)</span>
+        </label>
+      </div>
+      <div class="field-group">
+        <p>Public Network Name (SSID)</p>
+        <input type="text" id="showAPSSID" placeholder="SHOW_AUDIO" maxlength="32">
+      </div>
+      <div class="field-group">
+        <p>Show AP IP Address</p>
+        <input type="text" id="showAPIP" placeholder="192.168.60.1">
+      </div>
+      <div id="showAPWarning" class="small" style="color:var(--bad);display:none;"></div>
+      <button id="saveShowAP" style="margin-top:14px;">Save &amp; Restart</button>
+      <div id="showAPStatus" class="status-msg"></div>
+      <div style="margin-top:12px;border-top:1px solid rgba(255,255,255,.08);padding-top:10px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <p style="margin:0;font-size:14px;color:var(--accent);">Public Clients</p>
+          <button class="btn-sm" id="refreshShowClients" style="font-size:12px;padding:4px 10px;">Refresh</button>
+        </div>
+        <div id="showClientList" style="font-size:13px;color:var(--muted);">--</div>
+      </div>
+      <div class="small">Open WiFi with captive portal. Phones auto-redirect to the listen page. Audio sync is shared between both APs.</div>
+    </div>
+  </div>
 
 </div>
 
@@ -1004,6 +1036,7 @@ async function loadAPConfig() {
     }
     apStatusLine.innerHTML = statusHtml;
     loadAPClients();
+    initShowAPCard(res.ap_iface);
   } catch(e) {}
 }
 
@@ -1078,6 +1111,115 @@ document.getElementById("applyAP").addEventListener("click", async () => {
     }
   } catch(e) { showStatus(apStatus, "Network error", false); }
   btn.disabled = false; btn.textContent = "Save & Restart AP";
+});
+
+
+// ====== SBS+ Show AP Settings ======
+const showAPCard = document.getElementById("showAPCard");
+const showAPToggle = document.getElementById("showAPToggle");
+const showAPBody = document.getElementById("showAPBody");
+const showAPStatusLine = document.getElementById("showAPStatusLine");
+const showAPStatus = document.getElementById("showAPStatus");
+const showAPWarning = document.getElementById("showAPWarning");
+
+showAPToggle.addEventListener("click", () => {
+  const open = showAPBody.classList.toggle("open");
+  showAPToggle.innerHTML = (open ? "&#9650;" : "&#9660;") + " SBS+ Public Listener AP";
+});
+
+function initShowAPCard(apIface) {
+  // Only show SBS+ card when eavesdrop is on wlan0 (SBS mode)
+  if (apIface !== "wlan0") {
+    showAPCard.style.display = "none";
+    return;
+  }
+  showAPCard.style.display = "";
+  loadShowAPConfig();
+}
+
+async function loadShowAPConfig() {
+  try {
+    const res = await adminPost({ action: "get_show_ap_config" });
+    if (!res.success) return;
+    document.getElementById("showAPEnabled").checked = res.enabled;
+    if (res.ssid) document.getElementById("showAPSSID").placeholder = res.ssid;
+    if (res.ip) document.getElementById("showAPIP").placeholder = res.ip;
+
+    let statusHtml = "Show AP " + (res.running ? "<span style='color:var(--ok)'>running</span>" : "stopped") +
+      " | " + esc(res.show_iface || "?") +
+      " | SSID: " + esc(res.ssid || "?") +
+      " | IP: " + esc(res.ip || "?");
+    showAPStatusLine.innerHTML = statusHtml;
+
+    // Warning if show interface not detected
+    if (!res.has_show_iface) {
+      showAPWarning.style.display = "";
+      showAPWarning.textContent = "\u26A0 " + (res.show_iface || "wlan1") + " not detected \u2014 plug in a USB WiFi adapter for SBS+ mode.";
+    } else {
+      showAPWarning.style.display = "none";
+    }
+
+    if (res.enabled && res.has_show_iface) loadShowAPClients();
+  } catch(e) {}
+}
+
+async function loadShowAPClients() {
+  const el = document.getElementById("showClientList");
+  try {
+    const res = await adminPost({ action: "get_show_ap_clients" });
+    if (!res.success) { el.textContent = "Error loading clients"; return; }
+    if (res.count === 0) { el.textContent = "No public clients connected"; return; }
+    let html = "<table style='width:100%;font-size:13px;border-collapse:collapse;'>";
+    html += "<tr style='color:var(--accent);border-bottom:1px solid rgba(255,255,255,.1);'><td style='padding:3px 6px;'>IP</td><td style='padding:3px 6px;'>MAC</td><td style='padding:3px 6px;'>Host</td></tr>";
+    res.clients.forEach(c => {
+      html += "<tr style='border-bottom:1px solid rgba(255,255,255,.04);'>";
+      html += "<td style='padding:3px 6px;'>" + esc(c.ip) + "</td>";
+      html += "<td style='padding:3px 6px;font-family:monospace;font-size:12px;'>" + esc(c.mac) + "</td>";
+      html += "<td style='padding:3px 6px;'>" + esc(c.hostname || "-") + "</td>";
+      html += "</tr>";
+    });
+    html += "</table>";
+    el.innerHTML = html;
+  } catch(e) { el.textContent = "Error loading clients"; }
+}
+
+document.getElementById("refreshShowClients").addEventListener("click", loadShowAPClients);
+
+document.getElementById("saveShowAP").addEventListener("click", async () => {
+  const enabled = document.getElementById("showAPEnabled").checked ? "1" : "0";
+  const ssid = document.getElementById("showAPSSID").value.trim();
+  const ip = document.getElementById("showAPIP").value.trim();
+
+  if (ssid && (ssid.length < 1 || ssid.length > 32)) {
+    showStatus(showAPStatus, "SSID must be 1-32 characters", false); return;
+  }
+  if (ip && !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+    showStatus(showAPStatus, "Enter a valid IPv4 address", false); return;
+  }
+
+  let changes = [];
+  changes.push(enabled === "1" ? "Enable SBS+ public AP" : "Disable SBS+ public AP");
+  if (ssid) changes.push("SSID: " + ssid);
+  if (ip) changes.push("IP: " + ip);
+  if (!confirm("Save and restart?\n\n" + changes.join("\n"))) return;
+
+  const btn = document.getElementById("saveShowAP");
+  btn.disabled = true; btn.textContent = "Saving...";
+  try {
+    const res = await adminPost({
+      action: "save_show_ap_config",
+      enabled: enabled,
+      ssid: ssid || "",
+      ip: ip || ""
+    });
+    showStatus(showAPStatus, res.success ? res.message : (res.error || "Failed"), res.success);
+    if (res.success) {
+      document.getElementById("showAPSSID").value = "";
+      document.getElementById("showAPIP").value = "";
+      loadShowAPConfig();
+    }
+  } catch(e) { showStatus(showAPStatus, "Network error", false); }
+  btn.disabled = false; btn.textContent = "Save & Restart";
 });
 
 
