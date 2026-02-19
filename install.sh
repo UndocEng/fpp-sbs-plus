@@ -110,7 +110,7 @@ wmm_enabled=1
 ieee80211n=1
 auth_algs=1
 ignore_broadcast_ssid=0
-ap_isolate=1
+ap_isolate=0
 
 # WPA2 configuration
 wpa=2
@@ -225,6 +225,40 @@ fi
 # Restart Apache to apply changes
 sudo systemctl restart apache2 2>/dev/null || sudo apachectl restart 2>/dev/null || true
 echo "[install] Apache restarted"
+
+# ====== FPP Plugin Registration ======
+
+PLUGIN_DIR="/home/fpp/media/plugins/fpp-eavesdrop"
+echo "[install] Registering FPP plugin..."
+sudo mkdir -p "$PLUGIN_DIR"
+sudo cp -f "$ROOT_DIR/pluginInfo.json" "$PLUGIN_DIR/pluginInfo.json"
+sudo cp -f "$ROOT_DIR/api.php" "$PLUGIN_DIR/api.php"
+sudo chown -R fpp:fpp "$PLUGIN_DIR"
+echo "[install] Plugin registered"
+
+# Deploy custom.js footer button (appends if not already present)
+CUSTOM_JS="/home/fpp/media/config/custom.js"
+if ! grep -q "fpp-eavesdrop" "$CUSTOM_JS" 2>/dev/null; then
+  echo "[install] Adding Eavesdrop footer button..."
+  cat >> "$CUSTOM_JS" <<'JSEOF'
+
+// -- fpp-eavesdrop: Undoc footer button --
+$(document).ready(function() {
+    if ($('#rebootShutdown').length) {
+        var btn = $('<button>')
+            .attr('type', 'button')
+            .addClass('buttons wideButton btn-outline-light')
+            .html('<i class="fas fa-fw fa-headphones fa-nbsp"></i>Undoc Eavesdrop')
+            .on('click', function() { window.open('/listen/', '_blank'); });
+        $('#rebootShutdown').prepend(btn);
+    }
+});
+// -- end fpp-eavesdrop --
+JSEOF
+  echo "[install] Footer button added"
+else
+  echo "[install] Footer button already present"
+fi
 
 # ====== Self-Test ======
 echo ""

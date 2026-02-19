@@ -39,7 +39,7 @@ wmm_enabled=1
 ieee80211n=1
 auth_algs=1
 ignore_broadcast_ssid=0
-ap_isolate=1
+ap_isolate=0
 
 # WPA2 configuration
 wpa=2
@@ -74,6 +74,34 @@ sudo dnsmasq --conf-file="$DNSMASQ_CONF"
 echo "[listener-ap] Starting hostapd..."
 sudo pkill -f "hostapd-listener.conf" || true
 sudo hostapd "$HOSTAPD_CONF" -B
+
+# Route replies back to AP clients via wlan1 (fixes overlapping subnet with eth0)
+# Mark connections arriving on wlan1 via conntrack, restore mark on replies,
+# then policy-route marked replies out wlan1 instead of eth0.
+echo "[listener-ap] Setting up routing for AP clients..."
+sudo sysctl -w net.ipv4.ip_forward=1 > /dev/null
+
+# Clean up any previous nftables rules from us
+sudo nft delete table inet listener_ap 2>/dev/null || true
+
+# Create nftables rules: mark incoming wlan1 packets, restore mark on replies
+sudo nft -f - <<NFT
+table inet listener_ap {
+  chain prerouting {
+    type filter hook prerouting priority mangle; policy accept;
+    iifname "$WLAN_IF" ct mark set 0x64
+  }
+  chain output {
+    type route hook output priority mangle; policy accept;
+    ct mark 0x64 meta mark set 0x64
+  }
+}
+NFT
+
+# Policy route: marked packets use table 100 (routes via wlan1)
+sudo ip rule del fwmark 0x64 table 100 2>/dev/null || true
+sudo ip rule add fwmark 0x64 table 100
+sudo ip route replace "${o1}.${o2}.${o3}.0/${AP_MASK}" dev "$WLAN_IF" table 100
 
 # Read actual SSID from config for status message
 CURRENT_SSID=$(grep '^ssid=' "$HOSTAPD_CONF" 2>/dev/null | cut -d= -f2 || echo "SHOW_AUDIO")

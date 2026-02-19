@@ -89,6 +89,25 @@ if [[ -d "/home/fpp/listen-sync" ]]; then
   echo "[uninstall] Config directory removed"
 fi
 
+# 8. Remove FPP plugin registration
+echo "[uninstall] Removing FPP plugin..."
+if [[ -d "/home/fpp/media/plugins/fpp-eavesdrop" ]]; then
+  sudo rm -rf /home/fpp/media/plugins/fpp-eavesdrop
+  echo "[uninstall] Plugin removed"
+fi
+
+# 9. Remove custom.js footer button
+CUSTOM_JS="/home/fpp/media/config/custom.js"
+if [[ -f "$CUSTOM_JS" ]] && grep -q "fpp-eavesdrop" "$CUSTOM_JS"; then
+  echo "[uninstall] Removing footer button from custom.js..."
+  sed -i '/-- fpp-eavesdrop/,/-- end fpp-eavesdrop --/d' "$CUSTOM_JS"
+  # Remove file if empty (only whitespace left)
+  if [[ ! -s "$CUSTOM_JS" ]] || ! grep -q '[^[:space:]]' "$CUSTOM_JS"; then
+    rm -f "$CUSTOM_JS"
+  fi
+  echo "[uninstall] Footer button removed"
+fi
+
 echo ""
 echo "========================================="
 echo "  Uninstall complete!"

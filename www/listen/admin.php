@@ -33,6 +33,9 @@ switch ($action) {
   case 'change_ip':
     echo json_encode(changeIP($_POST['ip'] ?? ''));
     break;
+  case 'get_ap_clients':
+    echo json_encode(getAPClients());
+    break;
   default:
     echo json_encode(["success" => false, "error" => "Unknown action"]);
 }
@@ -150,7 +153,50 @@ function getAPConfig() {
   exec("systemctl is-active listener-ap 2>/dev/null", $out, $ret);
   $result["service_active"] = ($ret === 0);
 
+  // Check for subnet conflict with other interfaces
+  $result["subnet_conflict"] = checkSubnetConflict($result["ip"], intval($result["netmask"]));
+
   return $result;
+}
+
+
+function checkSubnetConflict($apIP, $cidr) {
+  // Compute AP network address
+  $apLong = ip2long($apIP);
+  if ($apLong === false) return null;
+  $mask = $cidr > 0 ? (~0 << (32 - $cidr)) : 0;
+  $apNetwork = $apLong & $mask;
+
+  // Read all interface IPs
+  $output = [];
+  exec("ip -4 addr show 2>/dev/null", $output);
+  $conflicts = [];
+  $currentIface = '';
+  foreach ($output as $line) {
+    // Match interface name lines (e.g., "2: eth0: <...")
+    if (preg_match('/^\d+:\s+(\S+):/', $line, $m)) {
+      $currentIface = $m[1];
+    }
+    // Match inet lines (e.g., "    inet 10.1.66.204/24 ...")
+    if (preg_match('/inet\s+(\d+\.\d+\.\d+\.\d+)\/(\d+)/', $line, $m)) {
+      $ifIP = $m[1];
+      $ifCidr = intval($m[2]);
+      // Skip wlan1 (that's us) and loopback
+      if ($currentIface === 'wlan1' || $currentIface === 'lo') continue;
+      $ifLong = ip2long($ifIP);
+      if ($ifLong === false) continue;
+      $ifMask = $ifCidr > 0 ? (~0 << (32 - $ifCidr)) : 0;
+      $ifNetwork = $ifLong & $ifMask;
+      // Check if networks overlap (compare using the smaller mask)
+      $checkMask = ($mask & $ifMask);
+      if (($apLong & $checkMask) === ($ifLong & $checkMask)) {
+        $conflicts[] = $currentIface . " (" . $ifIP . "/" . $ifCidr . ")";
+      }
+    }
+  }
+  if (empty($conflicts)) return null;
+  return "AP subnet overlaps with: " . implode(", ", $conflicts) .
+    ". Clients may have trouble reaching the FPP at those addresses.";
 }
 
 
@@ -299,4 +345,55 @@ function changeIP($newIP) {
   }
 
   return ["success" => true, "message" => "IP changed to " . $newIP . ". AP restarting -- reconnect and browse to http://" . $newIP . "/listen/"];
+}
+
+
+// ── AP Connected Clients ─────────────────────────────────────────────
+
+function getAPClients() {
+  $hasWlan1 = file_exists('/sys/class/net/wlan1');
+  if (!$hasWlan1) {
+    return ["success" => true, "clients" => [], "count" => 0];
+  }
+
+  $clients = [];
+
+  // Read DHCP leases (timestamp mac ip hostname client-id)
+  $leases = @file("/var/lib/misc/dnsmasq.leases", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+  $leaseMap = [];
+  if ($leases !== false) {
+    foreach ($leases as $line) {
+      $parts = preg_split('/\s+/', $line, 5);
+      if (count($parts) >= 4) {
+        $leaseMap[strtolower($parts[1])] = [
+          "ip" => $parts[2],
+          "hostname" => ($parts[3] !== '*') ? $parts[3] : ''
+        ];
+      }
+    }
+  }
+
+  // Read wlan1 ARP table from /proc/net/arp
+  $arp = @file("/proc/net/arp", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+  if ($arp !== false) {
+    foreach ($arp as $i => $line) {
+      if ($i === 0) continue; // skip header
+      $parts = preg_split('/\s+/', $line);
+      // columns: IP, HW type, Flags, HW address, Mask, Device
+      if (count($parts) >= 6 && $parts[5] === 'wlan1' && $parts[2] !== '0x0') {
+        $mac = strtolower($parts[3]);
+        $client = [
+          "mac" => $mac,
+          "ip" => $parts[0],
+          "hostname" => ""
+        ];
+        if (isset($leaseMap[$mac])) {
+          $client["hostname"] = $leaseMap[$mac]["hostname"];
+        }
+        $clients[] = $client;
+      }
+    }
+  }
+
+  return ["success" => true, "clients" => $clients, "count" => count($clients)];
 }

@@ -10,7 +10,7 @@
       --card:#171a21;
       --ink:#e9eef7;
       --muted:#9aa6b2;
-      --accent:#00e5ff;
+      --accent:#D4A030;
       --bad:#ff4d4d;
       --ok:#4dff88;
     }
@@ -59,7 +59,7 @@
     .status-msg.error{ background:rgba(255,77,77,.15); color:var(--bad); }
     /* Sync UI */
     .idle-msg{ text-align:center; margin-top:16px; padding:16px; border:1px solid rgba(255,255,255,.06); border-radius:12px; background:rgba(0,0,0,.14); color:var(--muted); font-size:15px; }
-    .now-playing{ text-align:center; margin-top:14px; padding:12px; border:1px solid var(--accent); border-radius:12px; background:rgba(0,229,255,.06); font-size:16px; color:var(--accent); }
+    .now-playing{ text-align:center; margin-top:14px; padding:12px; border:1px solid var(--accent); border-radius:12px; background:rgba(212,160,48,.08); font-size:16px; color:var(--accent); }
     .err{ color:var(--bad); font-weight:600; font-size:13px; margin-top:6px; }
     .debug-toggle{ margin-top:14px; font-size:13px; color:var(--muted); opacity:.6; }
     .debug-toggle label{ cursor:pointer; }
@@ -86,30 +86,6 @@
       <button id="stopSeq">Stop</button>
     </div>
     <div id="seqStatus" class="status-msg"></div>
-  </div>
-
-  <!-- WiFi AP Options -- only shown if wlan1 exists -->
-  <div class="card" id="optionsCard" style="display:none;">
-    <div class="opts-toggle" id="optsToggle">&#9660; WiFi AP Settings</div>
-    <div class="opts-body" id="optsBody">
-      <div id="apStatusLine" style="font-size:13px;color:var(--muted);margin-bottom:8px;"></div>
-      <div class="field-group">
-        <p>Network Name (SSID)</p>
-        <input type="text" id="newSSID" placeholder="SHOW_AUDIO" maxlength="32">
-        <button class="btn-sm" id="changeSSID">Change SSID</button>
-      </div>
-      <div class="field-group">
-        <p>Password (8-63 characters)</p>
-        <input type="password" id="newPass" maxlength="63">
-        <button class="btn-sm" id="changePass">Change Password</button>
-      </div>
-      <div class="field-group">
-        <p>AP IP Address</p>
-        <input type="text" id="newIP" placeholder="192.168.50.1">
-        <button class="btn-sm" id="changeIP">Change IP</button>
-      </div>
-      <div id="apStatus" class="status-msg"></div>
-    </div>
   </div>
 
   <!-- Sync Status -->
@@ -158,6 +134,38 @@
 
     <div class="footer" id="verFooter"></div>
   </div>
+
+  <!-- WiFi AP Options -- only shown if wlan1 exists -->
+  <div class="card" id="optionsCard" style="display:none;">
+    <div class="opts-toggle" id="optsToggle">&#9660; WiFi AP Settings</div>
+    <div class="opts-body" id="optsBody">
+      <div id="apStatusLine" style="font-size:13px;color:var(--muted);margin-bottom:8px;"></div>
+      <div class="field-group">
+        <p>Network Name (SSID)</p>
+        <input type="text" id="newSSID" placeholder="SHOW_AUDIO" maxlength="32">
+        <button class="btn-sm" id="changeSSID">Change SSID</button>
+      </div>
+      <div class="field-group">
+        <p>Password (8-63 characters)</p>
+        <input type="password" id="newPass" maxlength="63">
+        <button class="btn-sm" id="changePass">Change Password</button>
+      </div>
+      <div class="field-group">
+        <p>AP IP Address</p>
+        <input type="text" id="newIP" placeholder="192.168.50.1">
+        <button class="btn-sm" id="changeIP">Change IP</button>
+      </div>
+      <div id="apStatus" class="status-msg"></div>
+      <div style="margin-top:12px;border-top:1px solid rgba(255,255,255,.08);padding-top:10px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <p style="margin:0;font-size:14px;color:var(--accent);">Connected Clients</p>
+          <button class="btn-sm" id="refreshClients" style="font-size:12px;padding:4px 10px;">Refresh</button>
+        </div>
+        <div id="clientList" style="font-size:13px;color:var(--muted);">--</div>
+      </div>
+    </div>
+  </div>
+
 
 </div>
 
@@ -918,6 +926,8 @@ const seqStatus = document.getElementById("seqStatus");
 startSeqBtn.addEventListener("click", async () => {
   const seq = seqSelect.value;
   if(!seq){ showStatus(seqStatus, "Select a playlist or sequence first", false); return; }
+  // User tapped Start — this is a gesture, so unlock audio now
+  unlockAudio();
   startSeqBtn.disabled = true; startSeqBtn.textContent = "Starting...";
   try {
     const res = await adminPost({ action: "start_sequence", sequence: seq });
@@ -943,16 +953,24 @@ const optsBody = document.getElementById("optsBody");
 const apStatusLine = document.getElementById("apStatusLine");
 const apStatus = document.getElementById("apStatus");
 
+let _noWlan1 = false;
 optsToggle.addEventListener("click", () => {
   const open = optsBody.classList.toggle("open");
-  optsToggle.innerHTML = (open ? "&#9650;" : "&#9660;") + " WiFi AP Settings";
+  const arrow = open ? "&#9650;" : "&#9660;";
+  const warn = _noWlan1 ? " — <span style='color:var(--bad)'>No AP (wlan1 not detected)</span>" : "";
+  optsToggle.innerHTML = arrow + " WiFi AP Settings" + warn;
 });
 
-// Show WiFi card if wlan1 detected (piggyback on get_sequences response)
+// Show WiFi card — with warning if wlan1 absent
 // Called from loadSequences below
 function initWiFiCard(hasWlan1, currentSSID) {
-  if (!hasWlan1) return;
   optionsCard.style.display = "";
+  if (!hasWlan1) {
+    _noWlan1 = true;
+    optsToggle.innerHTML = "&#9660; WiFi AP Settings — <span style='color:var(--bad)'>No AP (wlan1 not detected)</span>";
+    apStatusLine.innerHTML = "<span style='color:var(--bad);font-weight:600'>No AP — wlan1 not detected. Settings saved here will apply when a USB WiFi adapter is connected.</span>";
+    return;
+  }
   if (currentSSID) document.getElementById("newSSID").placeholder = currentSSID;
   // Load full AP config
   loadAPConfig();
@@ -964,10 +982,38 @@ async function loadAPConfig() {
     if (!res.success) return;
     if (res.ssid) document.getElementById("newSSID").placeholder = res.ssid;
     if (res.ip) document.getElementById("newIP").placeholder = res.ip;
-    apStatusLine.textContent = "AP " + (res.service_active ? "active" : "inactive") +
-      " | SSID: " + (res.ssid || "?") + " | IP: " + (res.ip || "?");
+    let statusHtml = "AP " + (res.service_active ? "active" : "inactive") +
+      " | SSID: " + esc(res.ssid || "?") + " | IP: " + esc(res.ip || "?");
+    if (res.subnet_conflict) {
+      statusHtml += '<div style="color:var(--bad);margin-top:6px;font-weight:600;">&#9888; ' + esc(res.subnet_conflict) + '</div>';
+    }
+    apStatusLine.innerHTML = statusHtml;
+    loadAPClients();
   } catch(e) {}
 }
+
+async function loadAPClients() {
+  const el = document.getElementById("clientList");
+  try {
+    const res = await adminPost({ action: "get_ap_clients" });
+    if (!res.success) { el.textContent = "Error loading clients"; return; }
+    if (res.count === 0) { el.textContent = "No clients connected"; return; }
+    let html = "<table style='width:100%;font-size:13px;border-collapse:collapse;'>";
+    html += "<tr style='color:var(--accent);border-bottom:1px solid rgba(255,255,255,.1);'><td style='padding:3px 6px;'>IP</td><td style='padding:3px 6px;'>MAC</td><td style='padding:3px 6px;'>Host</td></tr>";
+    res.clients.forEach(c => {
+      html += "<tr style='border-bottom:1px solid rgba(255,255,255,.04);'>";
+      html += "<td style='padding:3px 6px;'>" + esc(c.ip) + "</td>";
+      html += "<td style='padding:3px 6px;font-family:monospace;font-size:12px;'>" + esc(c.mac) + "</td>";
+      html += "<td style='padding:3px 6px;'>" + esc(c.hostname || "-") + "</td>";
+      html += "</tr>";
+    });
+    html += "</table>";
+    el.innerHTML = html;
+  } catch(e) { el.textContent = "Error loading clients"; }
+}
+function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+document.getElementById("refreshClients").addEventListener("click", loadAPClients);
 
 document.getElementById("changeSSID").addEventListener("click", async () => {
   const ssid = document.getElementById("newSSID").value.trim();

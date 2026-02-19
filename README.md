@@ -286,3 +286,21 @@ After ~12-14 seconds (settle + calibration), the phone stays locked to FPP's pos
 - **systemd service**: runs as `fpp` user with 64MB RAM / 25% CPU limits for Pi safety
 - **Playback control**: `POST /api/command` with "Start Playlist" / "Stop Now" commands
 - **Audio unlock**: browser autoplay policy requires a user gesture — first click/touch on the page silently plays and pauses to unlock the audio context
+
+---
+
+## Support This Project
+
+If this tool saved you time or made your show better, consider buying me a coffee:
+
+[![PayPal](https://img.shields.io/badge/PayPal-Donate-blue?logo=paypal)](https://www.paypal.com/donate/?hosted_button_id=Y66WZAYUA5ED6)
+
+<!--
+For non-GitHub pages that support scripts, use the hosted button:
+<div id="paypal-container-Y66WZAYUA5ED6"></div>
+<script>
+  paypal.HostedButtons({
+    hostedButtonId: "Y66WZAYUA5ED6",
+  }).render("#paypal-container-Y66WZAYUA5ED6")
+</script>
+-->
