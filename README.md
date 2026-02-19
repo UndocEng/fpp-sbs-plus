@@ -20,7 +20,7 @@ A **show-owner developer tool** for Falcon Player (FPP). Runs on the master Pi a
 
 If this tool saved you time or made your show better, consider buying me a coffee or donate for me to get more tokkens:
 
-[![PayPal](https://img.shields.io/badge/PayPal-Donate-blue?logo=paypal)](https://www.paypal.com/donate/?hosted_button_id=Y66WZAYUA5ED6)
+[![PayPal](https://img.shields.io/badge/PayPal-Donate-blue?logo=paypal)](https://www.paypal.com/ncp/payment/Y66WZAYUA5ED6)
 
 <!--
 For non-GitHub pages that support scripts, use the hosted button:
