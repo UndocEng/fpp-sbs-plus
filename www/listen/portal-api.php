@@ -21,5 +21,5 @@ header('Cache-Control: private, no-store, max-age=0');
 
 echo json_encode([
     'captive' => true,
-    'user-portal-url' => "http://$ip/listen/public.html"
+    'user-portal-url' => "http://$ip/listen/listen.html"
 ], JSON_UNESCAPED_SLASHES);

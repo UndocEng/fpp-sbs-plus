@@ -14,19 +14,19 @@
 #   When a phone connects to the show AP WiFi, it tries to detect if it
 #   has internet access. Because wildcard DNS resolves ALL domains to the
 #   show AP IP, these requests hit Apache. This .htaccess intercepts them
-#   and redirects to /listen/public.html (the public listen-only page).
+#   and redirects to /listen/listen.html (the public listen-only page).
 #
 # SECURITY MODEL:
 #   Requests from the show subnet are restricted to public-safe paths only:
-#     Allowed: /listen/public.html, status.php, version.php, portal-api.php,
+#     Allowed: /listen/listen.html, status.php, version.php, portal-api.php,
 #              detect.php, logo*.png, /music/, /ws
-#     Blocked: /listen/listen.html, /listen/admin.php, /api/, /settings/, etc.
+#     Blocked: /listen/admin.html, /listen/admin.php, /api/, /settings/, etc.
 #   All other sources (eavesdrop AP, localhost, eth0) get full FPP access.
 #
 # RULE ORDER (processed top to bottom, first match wins):
 #   1. Captive portal detection URLs from show subnet → redirect
 #   2. Whitelisted paths from show subnet → allow (pass through)
-#   3. Everything else from show subnet → redirect to public.html
+#   3. Everything else from show subnet → redirect to listen.html
 #   4. All other sources → pass through (full FPP access, no rules needed)
 #
 # =============================================================================
@@ -47,17 +47,17 @@
     RewriteCond %{REMOTE_ADDR} ^__SHOW_SUBNET_ESC__
     RewriteCond %{REQUEST_URI} ^/(generate_204|gen_204|hotspot-detect\.html|success\.html|success\.txt|connecttest\.txt|canonical\.html|ncsi\.txt|redirect)$ [NC,OR]
     RewriteCond %{HTTP_HOST} ^(captive\.apple\.com|connectivitycheck\.gstatic\.com|connectivitycheck\.android\.com|clients[0-9]\.google\.com|www\.msftconnecttest\.com|msftconnecttest\.com|msftncsi\.com)$ [NC]
-    RewriteRule ^ http://__SHOW_AP_IP__/listen/public.html [R=302,L]
+    RewriteRule ^ http://__SHOW_AP_IP__/listen/listen.html [R=302,L]
 
     # --- Rules 2a-d: Whitelist allowed paths from show network ---
     # These rules use [L] (Last) to stop processing — the request passes through
     # to the actual file/directory without any redirect.
 
     # 2a. Allow specific public files under /listen/
-    #     public.html (the page), status.php (sync), version.php (version info),
+    #     listen.html (the page), status.php (sync), version.php (version info),
     #     portal-api.php (RFC 8908), detect.php (legacy portal), logo images
     RewriteCond %{REMOTE_ADDR} ^__SHOW_SUBNET_ESC__
-    RewriteCond %{REQUEST_URI} ^/listen/(public\.html|status\.php|version\.php|portal-api\.php|detect\.php|logo[^/]*\.png)$ [NC]
+    RewriteCond %{REQUEST_URI} ^/listen/(listen\.html|status\.php|version\.php|portal-api\.php|detect\.php|logo[^/]*\.png)$ [NC]
     RewriteRule ^ - [L]
 
     # 2b. Allow /music/ (audio files served from FPP's music directory)
@@ -76,13 +76,13 @@
     RewriteRule ^ - [L]
 
     # --- Rule 3: Block everything else from show network ---
-    # Any path not in the whitelist above (e.g., /listen/listen.html,
-    # /listen/admin.php, /api/, /settings/) gets redirected to public.html.
+    # Any path not in the whitelist above (e.g., /listen/admin.html,
+    # /listen/admin.php, /api/, /settings/) gets redirected to listen.html.
     # This protects FPP's admin interface and the eavesdrop admin page.
     # Also catches wildcard domain requests (phone tried to load google.com
     # but DNS resolved it to the show AP IP).
     RewriteCond %{REMOTE_ADDR} ^__SHOW_SUBNET_ESC__
-    RewriteRule ^ http://__SHOW_AP_IP__/listen/public.html [R=302,L]
+    RewriteRule ^ http://__SHOW_AP_IP__/listen/listen.html [R=302,L]
 
     # --- Rule 4: All other sources pass through ---
     # Eavesdrop AP clients, localhost, eth0, fpp.local get full FPP access.

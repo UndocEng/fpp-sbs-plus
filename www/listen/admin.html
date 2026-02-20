@@ -1,0 +1,1229 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Show Audio</title>
+  <style>
+    :root{
+      --bg:#0f1115;
+      --card:#171a21;
+      --ink:#e9eef7;
+      --muted:#9aa6b2;
+      --accent:#D4A030;
+      --bad:#ff4d4d;
+      --ok:#4dff88;
+    }
+    *{ box-sizing:border-box; }
+    body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; background:var(--bg); color:var(--ink); }
+    .wrap{ max-width:720px; margin:0 auto; padding:18px; }
+    .header{ text-align:center; margin:10px 0 18px; }
+    .header img{ width:86px; height:86px; border-radius:18px; box-shadow:0 8px 28px rgba(0,0,0,.35); }
+    h1{ margin:12px 0 6px; font-size:34px; letter-spacing:.3px; color:var(--accent); }
+    .sub{ margin:0; color:var(--muted); font-size:14px; }
+    .card{
+      background:var(--card); border:1px solid rgba(255,255,255,.06);
+      border-radius:16px; padding:16px; margin-top:16px; box-shadow:0 10px 30px rgba(0,0,0,.35);
+    }
+    .card:first-of-type{ margin-top:0; }
+    .section-title{ margin:0 0 10px; font-size:16px; color:var(--accent); }
+    button{
+      font-size:16px; padding:12px 16px; border-radius:12px;
+      border:2px solid var(--accent); background:#11141a; color:var(--ink);
+      cursor:pointer; width:100%;
+    }
+    button:active{ transform:scale(.99); }
+    button:disabled{ opacity:.5; cursor:default; }
+    .row{ display:flex; gap:10px; margin-top:10px; }
+    .row button{ width:50%; }
+    .small{ margin-top:12px; font-size:12px; color:var(--muted); line-height:1.4; }
+    .footer{ margin-top:14px; text-align:center; font-size:12px; color:var(--muted); opacity:.85; }
+    audio{ width:100%; margin-top:12px; }
+    select{
+      width:100%; font-size:16px; padding:10px 12px; border-radius:10px;
+      border:1px solid rgba(255,255,255,.12); background:rgba(0,0,0,.18); color:var(--ink);
+      cursor:pointer;
+    }
+    input[type="text"],input[type="password"]{
+      width:100%; font-size:16px; padding:10px 12px; border-radius:10px;
+      border:1px solid rgba(255,255,255,.12); background:rgba(0,0,0,.18); color:var(--ink);
+    }
+    .btn-sm{ font-size:14px; padding:10px 14px; margin-top:10px; width:auto; display:inline-block; }
+    .opts-toggle{ cursor:pointer; color:var(--accent); font-size:15px; padding:4px 0; user-select:none; }
+    .opts-body{ display:none; margin-top:12px; }
+    .opts-body.open{ display:block; }
+    .field-group{ margin-top:14px; }
+    .field-group p{ margin:0 0 6px; font-size:14px; color:var(--muted); }
+    .status-msg{ margin-top:8px; font-size:12px; padding:8px; border-radius:8px; display:none; }
+    .status-msg.success{ background:rgba(77,255,136,.15); color:var(--ok); }
+    .status-msg.error{ background:rgba(255,77,77,.15); color:var(--bad); }
+    /* Sync UI */
+    .idle-msg{ text-align:center; margin-top:16px; padding:16px; border:1px solid rgba(255,255,255,.06); border-radius:12px; background:rgba(0,0,0,.14); color:var(--muted); font-size:15px; }
+    .now-playing{ text-align:center; margin-top:14px; padding:12px; border:1px solid var(--accent); border-radius:12px; background:rgba(212,160,48,.08); font-size:16px; color:var(--accent); }
+    .err{ color:var(--bad); font-weight:600; font-size:13px; margin-top:6px; }
+    .debug-toggle{ margin-top:14px; font-size:13px; color:var(--muted); opacity:.6; }
+    .debug-toggle label{ cursor:pointer; }
+    .box{ margin-top:8px; padding:12px; border:1px solid rgba(255,255,255,.06); border-radius:12px; background:rgba(0,0,0,.14); font-size:13px; color:var(--muted); }
+    .box b{ color:var(--ink); opacity:.8; }
+    .hidden{ display:none; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <img src="logo.png" alt="Undocumented Engineer" />
+    <h1>Show Audio</h1>
+    <p class="sub" id="ver">v...</p>
+    <p class="sub">Keep this page open during the show.</p>
+    <p class="sub" style="margin-top:8px;"><a href="/" style="color:var(--accent);text-decoration:none;">&#8592; Back to FPP</a></p>
+  </div>
+
+  <!-- Playback Control -- always visible -->
+  <div class="card">
+    <h3 class="section-title">Playback</h3>
+    <select id="seqSelect"><option value="">Loading...</option></select>
+    <div class="row">
+      <button id="startSeq">Start</button>
+      <button id="stopSeq">Stop</button>
+    </div>
+    <div id="seqStatus" class="status-msg"></div>
+  </div>
+
+  <!-- Sync Status -->
+  <div class="card">
+    <button id="enableBtn">Enable Audio</button>
+    <div id="idleMsg" class="idle-msg">No show is currently broadcasting.</div>
+    <div id="nowPlaying" class="now-playing hidden">&#9835; Now Playing<div id="trackName" style="margin-top:4px;">-</div><div id="mediaFile" style="font-size:13px;color:var(--muted);margin-top:2px;"></div></div>
+
+    <div class="err" id="fetchErr"></div>
+    <div class="err" id="playErr"></div>
+
+    <div class="debug-toggle">
+      <label><input type="checkbox" id="debugCheck" /> Debug</label> &nbsp;
+      <label><input type="checkbox" id="logCheck" /> Client Log</label> &nbsp;
+      <label><input type="checkbox" id="serverLogCheck" /> Server Log</label>
+    </div>
+
+    <div id="debugBox" class="box hidden">
+      <div><b>Transport:</b> <span id="transport">-</span></div>
+      <div><b>RTT:</b> <span id="rtt">-</span> ms</div>
+      <div><b>Clock Offset:</b> <span id="offset">-</span> ms</div>
+      <div><b>Sequence:</b> <span id="seq">-</span></div>
+      <div><b>State:</b> <span id="state">-</span></div>
+      <div><b>Target:</b> <span id="target">-</span> ms</div>
+      <div><b>Local:</b> <span id="local">-</span> ms</div>
+      <div><b>Error:</b> <span id="err">-</span> ms</div>
+      <div><b>PLL State:</b> <span id="pllState">idle</span></div>
+      <div><b>Rate:</b> <span id="pllRate">1.000</span>x</div>
+      <div><b>Avg Error (2s):</b> <span id="avgErr2s">-</span> ms</div>
+      <div><b>Avg Error (all):</b> <span id="avgErrAll">-</span> ms</div>
+      <div><b>Effective Rate:</b> <span id="effRate">-</span></div>
+      <div><b>Buffered:</b> <span id="buffered">-</span> s</div>
+      <div><b>Last Correction:</b> <span id="lastCorrection">-</span></div>
+      <div><b>Play Latency:</b> <span id="playLatency">0</span> ms</div>
+    </div>
+
+    <div id="logControls" class="hidden" style="margin-top:8px;text-align:right;">
+      <span id="logStatus" style="font-size:11px;color:#f90;margin-right:8px;"></span>
+      <button id="resumeLogBtn" style="font-size:12px;padding:4px 10px;width:auto;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.18);color:var(--muted);display:none;">Resume Log</button>
+      <button id="copyLogBtn" style="font-size:12px;padding:4px 10px;width:auto;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.18);color:var(--muted);">Copy Log</button>
+      <button id="clearLogBtn" style="font-size:12px;padding:4px 10px;width:auto;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.18);color:var(--muted);">Clear Log</button>
+    </div>
+    <div id="logBox" class="box hidden" style="max-height:200px;overflow-y:auto;font-family:monospace;font-size:11px;white-space:pre-wrap;"></div>
+
+    <audio id="audio" preload="auto" playsinline></audio>
+
+    <div class="footer" id="verFooter"></div>
+  </div>
+
+  <!-- WiFi AP Options -- shown if any wlan interface exists -->
+  <div class="card" id="optionsCard" style="display:none;">
+    <div class="opts-toggle" id="optsToggle">&#9660; WiFi AP Settings</div>
+    <div class="opts-body" id="optsBody">
+      <div id="apStatusLine" style="font-size:13px;color:var(--muted);margin-bottom:8px;"></div>
+      <div class="field-group">
+        <p>AP Interface</p>
+        <select id="apIface">
+          <option value="wlan1">wlan1 — USB adapter</option>
+          <option value="wlan0">wlan0 — Single Board Show (SBS)</option>
+        </select>
+      </div>
+      <div class="field-group">
+        <p>Network Name (SSID)</p>
+        <input type="text" id="newSSID" placeholder="SHOW_AUDIO" maxlength="32">
+      </div>
+      <div class="field-group">
+        <p>Password (8-63 characters)</p>
+        <input type="password" id="newPass" maxlength="63">
+      </div>
+      <div class="field-group">
+        <p>AP IP Address</p>
+        <input type="text" id="newIP" placeholder="192.168.50.1">
+      </div>
+      <button id="applyAP" style="margin-top:14px;">Save &amp; Restart AP</button>
+      <div id="apStatus" class="status-msg"></div>
+      <div style="margin-top:12px;border-top:1px solid rgba(255,255,255,.08);padding-top:10px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <p style="margin:0;font-size:14px;color:var(--accent);">Connected Clients</p>
+          <button class="btn-sm" id="refreshClients" style="font-size:12px;padding:4px 10px;">Refresh</button>
+        </div>
+        <div id="clientList" style="font-size:13px;color:var(--muted);">--</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SBS+ Show AP Settings -- shown when eavesdrop is on wlan0 -->
+  <div class="card" id="showAPCard" style="display:none;">
+    <div class="opts-toggle" id="showAPToggle">&#9660; SBS+ Public Listener AP</div>
+    <div class="opts-body" id="showAPBody">
+      <div id="showAPStatusLine" style="font-size:13px;color:var(--muted);margin-bottom:8px;"></div>
+      <div class="field-group">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" id="showAPEnabled" style="width:18px;height:18px;" />
+          <span style="font-size:15px;">Enable SBS+ (Public Listener AP)</span>
+        </label>
+      </div>
+      <div class="field-group">
+        <p>Public Network Name (SSID)</p>
+        <input type="text" id="showAPSSID" placeholder="SHOW_AUDIO" maxlength="32">
+      </div>
+      <div class="field-group">
+        <p>Show AP IP Address</p>
+        <input type="text" id="showAPIP" placeholder="192.168.60.1">
+      </div>
+      <div id="showAPWarning" class="small" style="color:var(--bad);display:none;"></div>
+      <button id="saveShowAP" style="margin-top:14px;">Save &amp; Restart</button>
+      <div id="showAPStatus" class="status-msg"></div>
+      <div style="margin-top:12px;border-top:1px solid rgba(255,255,255,.08);padding-top:10px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <p style="margin:0;font-size:14px;color:var(--accent);">Public Clients</p>
+          <button class="btn-sm" id="refreshShowClients" style="font-size:12px;padding:4px 10px;">Refresh</button>
+        </div>
+        <div id="showClientList" style="font-size:13px;color:var(--muted);">--</div>
+      </div>
+      <div class="small">Open WiFi with captive portal. Phones auto-redirect to the listen page. Audio sync is shared between both APs.</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(() => {
+// =============================================================================
+// FPP EAVESDROP — Adaptive PLL Audio Synchronization
+// =============================================================================
+// Ported from fpp-listener-sync v2.4.0
+//
+// Syncs HTML5 audio playback on audience phones to a Falcon Player (FPP)
+// master clock. Uses WebSocket (primary) or HTTP polling (fallback) for
+// transport, NTP-style clock offset estimation, and a 3-phase PLL
+// (idle -> calibrating -> locked) with adaptive gain and log-compressed
+// corrections. Converges in ~12-14 seconds with 5-25ms steady-state error.
+// =============================================================================
+
+// --- DOM References ---
+const enableBtn=document.getElementById('enableBtn'),
+audio=document.getElementById('audio'),
+mediaFileEl=document.getElementById('mediaFile'),
+idleMsg=document.getElementById('idleMsg'),
+nowPlaying=document.getElementById('nowPlaying'),
+trackName=document.getElementById('trackName'),
+pollEl=document.getElementById('transport'),
+fetchErrEl=document.getElementById('fetchErr'),
+playErrEl=document.getElementById('playErr'),
+seqEl=document.getElementById('seq'),
+stateEl=document.getElementById('state'),
+targetEl=document.getElementById('target'),
+localEl=document.getElementById('local'),
+errEl=document.getElementById('err'),
+pllStateEl=document.getElementById('pllState'),
+pllRateEl=document.getElementById('pllRate'),
+avgErr2sEl=document.getElementById('avgErr2s'),
+avgErrAllEl=document.getElementById('avgErrAll'),
+effRateEl=document.getElementById('effRate'),
+bufferedEl=document.getElementById('buffered'),
+lastCorrectionEl=document.getElementById('lastCorrection'),
+playLatencyEl=document.getElementById('playLatency'),
+rttEl=document.getElementById('rtt'),
+offsetEl=document.getElementById('offset'),
+debugCheck=document.getElementById('debugCheck'),
+debugBox=document.getElementById('debugBox');
+
+// --- Global State ---
+let currentBase="", pollTimer=null, haveMetadata=false, needInitialSeek=false, lastSeekMs=0, settleUntil=0, syncBusy=false;
+let logFrozen=false, wasPlaying=false;
+let pendingMsg=null, playAttempting=false;
+
+// --- WebSocket Transport ---
+const WS_RECONNECT_MS=2000;
+const WS_PING_INTERVAL_MS=1000;
+const HTTP_POLL_MS=250;
+let ws=null, wsConnected=false, wsPingTimer=null, wsReconnectTimer=null;
+
+// --- Clock Offset Estimation (NTP-style) ---
+let clockOffset=0, clockOffsetValid=false;
+const RTT_HISTORY_SIZE=5;
+const OFFSET_HISTORY_SIZE=8;
+const MIN_OFFSET_SAMPLES=3;
+let rttHistory=[];
+let offsetHistory=[];
+
+// --- Sync State ---
+const LEAD_MS=2000;
+const SEEK_COOLDOWN_MS=2000;
+let awaitingStart=false;
+let scheduledStartTarget=0;
+let lastCorrectionMs=0;
+let logThrottle=0;
+let errHistoryAll=[];
+let errHistory2s=[];
+
+// --- PLL Constants ---
+const CAL_MIN_MS=800;
+const Kp_BASE=0.01;
+const Kp_SCALE=4;
+const MAX_ADJ=0.05;
+const DEAD_ZONE_MS=5;
+const LOG_SCALE_MS=100;
+const HARD_SEEK_S=2.0;
+const RATE_EMA=0.05;
+const MIN_RATE_CHANGE=0.003;
+
+// --- PLL State Machine ---
+const pll={phase:'idle',samples:[],baseRate:1.0,anchorLocalMs:0,anchorFppMs:0,lastRateUpdateMs:0};
+
+// --- Effective Rate Measurement (diagnostic) ---
+let effRateWallMs=0, effRateLocalMs=0, lastEffRate=0;
+
+// --- Play-Ahead Latency Compensation ---
+const PLAY_LATENCY_KEY='fpp-play-latency';
+let playLatencyMs=0;
+let playCallWallMs=0;
+let playCallAudioPos=0;
+try{
+  const saved=localStorage.getItem(PLAY_LATENCY_KEY);
+  if(saved){const v=Number(saved);if(v>=0&&v<1000)playLatencyMs=v;}
+}catch(e){}
+
+// --- Utilities ---
+function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
+
+function pllReset(){
+  pll.phase='idle';pll.samples=[];pll.baseRate=1.0;pll.anchorLocalMs=0;pll.anchorFppMs=0;pll.lastRateUpdateMs=0;
+  if(audio)audio.playbackRate=1.0;
+}
+
+function linearSlope(samples){
+  if(samples.length<2)return 1.0;
+  const n=samples.length,first=samples[0];
+  let sumX=0,sumY=0,sumXX=0,sumXY=0;
+  for(let i=0;i<n;i++){
+    const x=samples[i].localMs-first.localMs;
+    const y=samples[i].fppMs-first.fppMs;
+    sumX+=x;sumY+=y;sumXX+=x*x;sumXY+=x*y;
+  }
+  const denom=n*sumXX-sumX*sumX;
+  if(Math.abs(denom)<1e-9)return 1.0;
+  return(n*sumXY-sumX*sumY)/denom;
+}
+
+// --- Client-Side Log ---
+const logBox=document.getElementById('logBox');
+const LOG_MAX=200;
+let logCount=0;
+const logCheck=document.getElementById('logCheck');
+function log(msg){
+  if(!logCheck.checked||logFrozen)return;
+  const t=new Date();
+  const ts=t.toTimeString().slice(0,8)+'.'+String(t.getMilliseconds()).padStart(3,'0');
+  const line=ts+' '+msg+'\n';
+  logBox.textContent+=line;
+  logCount++;
+  if(logCount>LOG_MAX){
+    const lines=logBox.textContent.split('\n');
+    logBox.textContent=lines.slice(-LOG_MAX).join('\n');
+    logCount=LOG_MAX;
+  }
+  logBox.scrollTop=logBox.scrollHeight;
+}
+
+// --- Server-Side Reporting ---
+const REPORT_INTERVAL_MS=1000;
+let lastReportMs=0;
+let lastRawPosMs=0, lastTargetMs=0, lastLocalMs=0;
+let lastAvg2s=0;
+const serverLogCheck=document.getElementById('serverLogCheck');
+function sendReport(event,errMs,rate){
+  if(!serverLogCheck.checked)return;
+  if(!ws||ws.readyState!==WebSocket.OPEN)return;
+  const now=Date.now();
+  const immediate=event==='START'||event==='CORRECTION'||event==='TRACK'||event==='INITIAL_SEEK'||event==='STOP';
+  if(!immediate&&(now-lastReportMs)<REPORT_INTERVAL_MS)return;
+  lastReportMs=now;
+  ws.send(JSON.stringify({
+    type:'report',
+    event:event,
+    fpp:Math.round(lastRawPosMs),
+    target:Math.round(lastTargetMs),
+    local:Math.round(lastLocalMs),
+    err:Math.round(errMs||0),
+    rate:Number((rate||1.0).toFixed(4)),
+    eff:Number((lastEffRate||0).toFixed(3)),
+    offset:Math.round(clockOffset),
+    avg2s:Math.round(lastAvg2s),
+    track:currentBase||''
+  }));
+}
+
+// --- Debug UI Controls ---
+const logControls=document.getElementById('logControls');
+debugCheck.addEventListener('change',()=>{
+  debugBox.classList.toggle('hidden',!debugCheck.checked);
+});
+logCheck.addEventListener('change',()=>{
+  const show=logCheck.checked;
+  logBox.classList.toggle('hidden',!show);
+  logControls.classList.toggle('hidden',!show);
+});
+document.getElementById('copyLogBtn').onclick=()=>{
+  if(navigator.clipboard){navigator.clipboard.writeText(logBox.textContent).then(()=>{document.getElementById('copyLogBtn').textContent='Copied!';setTimeout(()=>{document.getElementById('copyLogBtn').textContent='Copy Log';},1500);});}
+};
+document.getElementById('clearLogBtn').onclick=()=>{logBox.textContent='';logCount=0;logFrozen=false;document.getElementById('logStatus').textContent='';document.getElementById('resumeLogBtn').style.display='none';};
+document.getElementById('resumeLogBtn').onclick=()=>{logFrozen=false;document.getElementById('logStatus').textContent='';document.getElementById('resumeLogBtn').style.display='none';log('--- LOG RESUMED ---');};
+audio.addEventListener('loadedmetadata',()=>{haveMetadata=true;log('METADATA loaded');});
+audio.addEventListener('error',()=>{playErrEl.textContent="No matching audio file detected";log('AUDIO ERROR');});
+
+// =============================================================================
+// CLOCK OFFSET ESTIMATION
+// =============================================================================
+function updateClockOffset(serverTs, clientSendTs, rtt){
+  const sample=serverTs-clientSendTs-(rtt/2);
+  offsetHistory.push(sample);
+  if(offsetHistory.length>OFFSET_HISTORY_SIZE)offsetHistory.shift();
+  const sorted=[...offsetHistory].sort((a,b)=>a-b);
+  const median=sorted[Math.floor(sorted.length/2)];
+  if(!clockOffsetValid){
+    clockOffset=median;
+    clockOffsetValid=true;
+  }else{
+    clockOffset=clockOffset*0.7+median*0.3;
+  }
+  offsetEl.textContent=Math.round(clockOffset);
+}
+
+// =============================================================================
+// WEBSOCKET CONNECTION (primary transport)
+// =============================================================================
+function connectWebSocket(){
+  if(ws&&(ws.readyState===WebSocket.CONNECTING||ws.readyState===WebSocket.OPEN))return;
+  const wsUrl='ws://'+location.hostname+'/ws';
+  try{ws=new WebSocket(wsUrl);}catch(e){startHttpFallback();return;}
+
+  ws.onopen=()=>{
+    wsConnected=true;
+    stopHttpPolling();
+    offsetHistory=[];
+    clockOffsetValid=false;
+    clockOffset=0;
+    pollEl.textContent='WebSocket connected';
+    fetchErrEl.textContent='';
+    // Burst 5 rapid pings for fast clock calibration
+    sendPing();
+    setTimeout(sendPing,200);
+    setTimeout(sendPing,400);
+    setTimeout(sendPing,600);
+    setTimeout(sendPing,800);
+    if(wsPingTimer)clearInterval(wsPingTimer);
+    wsPingTimer=setInterval(sendPing,WS_PING_INTERVAL_MS);
+    log('WS CONNECTED, burst clock cal');
+  };
+
+  ws.onmessage=(event)=>{
+    try{
+      const data=JSON.parse(event.data);
+      if(data.type==='pong'){
+        handlePong(data);
+      }else if(data.state!==undefined){
+        sync(data);
+      }
+    }catch(e){}
+  };
+
+  ws.onclose=()=>{
+    log('WS DISCONNECTED, falling back to HTTP');
+    wsConnected=false;
+    if(wsPingTimer){clearInterval(wsPingTimer);wsPingTimer=null;}
+    pollEl.textContent='WS disconnected, HTTP fallback';
+    startHttpFallback();
+    if(wsReconnectTimer)clearTimeout(wsReconnectTimer);
+    wsReconnectTimer=setTimeout(connectWebSocket,WS_RECONNECT_MS);
+  };
+
+  ws.onerror=()=>{};
+}
+
+function sendPing(){
+  if(ws&&ws.readyState===WebSocket.OPEN){
+    ws.send(JSON.stringify({type:'ping',client_ts:Date.now()}));
+  }
+}
+
+function handlePong(data){
+  const now=Date.now();
+  const clientTs=data.client_ts;
+  const serverTs=data.server_ts;
+  const rtt=now-clientTs;
+  if(rtt>0&&rtt<500){
+    rttHistory.push(rtt);
+    if(rttHistory.length>RTT_HISTORY_SIZE)rttHistory.shift();
+    rttEl.textContent=rtt;
+    updateClockOffset(serverTs,clientTs,rtt);
+    log('PONG rtt='+rtt+'ms offset='+Math.round(clockOffset)+'ms');
+  }else{
+    log('PONG REJECTED rtt='+rtt+'ms (out of range)');
+  }
+}
+
+// =============================================================================
+// HTTP FALLBACK POLLING
+// =============================================================================
+function startHttpFallback(){
+  if(pollTimer)return;
+  pollTimer=setInterval(pollOnce,HTTP_POLL_MS);
+  pollOnce();
+}
+
+function stopHttpPolling(){
+  if(pollTimer){clearInterval(pollTimer);pollTimer=null;}
+}
+
+async function pollOnce(){
+  const t0=Date.now();
+  try{
+    const url=location.origin+'/listen/status.php?ts='+Date.now();
+    const r=await fetch(url,{cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const msg=await r.json();
+    const t1=Date.now();
+    const rtt=t1-t0;
+    if(!wsConnected)pollEl.textContent='HTTP ok ('+rtt+' ms)';
+    fetchErrEl.textContent='';
+    if(msg.server_ms&&rtt>0&&rtt<500){
+      updateClockOffset(msg.server_ms,t0,rtt);
+      if(!wsConnected)rttEl.textContent=rtt;
+    }
+    sync(msg);
+  }catch(e){
+    if(!wsConnected)pollEl.textContent='HTTP FAILED';
+    fetchErrEl.textContent='Fetch error: '+(e?.message||e);
+  }
+}
+
+// =============================================================================
+// AUDIO PLAYBACK HELPERS
+// =============================================================================
+let audioUnlocked=false;
+
+async function safePlay(){
+  try{
+    const p=audio.play();
+    if(p&&typeof p.catch==='function'){await p;}
+    playErrEl.textContent='';
+  }catch(e){
+    if(e&&e.name==='NotAllowedError'){
+      // Show the Enable button again so the user knows they need to tap
+      if(!audioUnlocked){enableBtn.classList.remove('hidden');}
+    }else{
+      playErrEl.textContent='Audio error: '+(e?.message||e);
+    }
+  }
+}
+
+// =============================================================================
+// AUDIO UNLOCK
+// =============================================================================
+// Enable Audio button satisfies browser autoplay policy.
+// Polling and state detection run regardless — this only gates audio playback.
+function unlockAudio(){
+  if(audioUnlocked)return;
+  audioUnlocked=true;
+  enableBtn.classList.add('hidden');
+  playErrEl.textContent='';
+  // If audio already has a source and is paused (sync tried but was blocked), play it now
+  if(audio.src&&audio.paused&&currentBase){
+    playAttempting=true;
+    safePlay().finally(()=>{playAttempting=false;});
+    return;
+  }
+  // Otherwise warm up the audio context with a silent play/pause
+  try{
+    audio.muted=true;
+    const p=audio.play();
+    if(p&&typeof p.then==='function'){
+      p.then(()=>{audio.pause();audio.currentTime=0;audio.muted=false;})
+      .catch(()=>{audio.muted=false;});
+    }else{audio.muted=false;}
+  }catch(e){audio.muted=false;}
+}
+enableBtn.onclick=unlockAudio;
+
+// Start transports immediately on page load
+pollEl.textContent='Connecting...';
+connectWebSocket();
+startHttpFallback();
+
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&!wsConnected){
+    connectWebSocket();
+  }
+});
+
+// =============================================================================
+// SYNC ALGORITHM
+// =============================================================================
+async function sync(msg){
+  pendingMsg=msg;
+  if(syncBusy)return;
+  syncBusy=true;
+  try{
+    while(pendingMsg){
+      const m=pendingMsg;
+      pendingMsg=null;
+      await syncInner(m);
+    }
+  }finally{syncBusy=false;}
+}
+
+async function syncInner(msg){
+  // Update debug display
+  seqEl.textContent=msg.base||'-';
+  stateEl.textContent=msg.state||'-';
+  targetEl.textContent=msg.pos_ms??'-';
+
+  // Show/hide idle vs playing indicators
+  if(msg.state==='stop'||!msg.base){
+    idleMsg.classList.remove('hidden');
+    nowPlaying.classList.add('hidden');
+    playErrEl.textContent='';
+  }else{
+    idleMsg.classList.add('hidden');
+    nowPlaying.classList.remove('hidden');
+    trackName.textContent=msg.base+'.fseq';
+    if(msg.mp3_url){
+      mediaFileEl.textContent=msg.mp3_url.split('/').pop();
+    }else{
+      mediaFileEl.textContent='No audio file found';
+    }
+  }
+
+  // --- Track Change ---
+  if(msg.base&&msg.base!==currentBase){
+    logBox.textContent='';logCount=0;logFrozen=false;
+    document.getElementById('logStatus').textContent='';
+    document.getElementById('resumeLogBtn').style.display='none';
+    log('TRACK CHANGE: '+msg.base+' src='+msg.mp3_url);
+    sendReport('TRACK',0,1.0);
+    currentBase=msg.base;
+    haveMetadata=false;
+    needInitialSeek=true;
+    awaitingStart=false;
+    audio.playbackRate=1.0;
+    audio.src=msg.mp3_url||'';
+    audio.load();
+    pllReset();
+    errHistoryAll=[];errHistory2s=[];
+    effRateWallMs=0;
+  }
+
+  // --- Stop State ---
+  if(msg.state==='stop'){
+    if(wasPlaying){
+      log('STATE: stop');
+      sendReport('STOP',0,1.0);
+      if(logCheck.checked){
+        logFrozen=true;
+        document.getElementById('logStatus').textContent='Log frozen (song ended)';
+        document.getElementById('resumeLogBtn').style.display='';
+      }
+    }
+    audio.pause();
+    audio.currentTime=0;
+    audio.playbackRate=1.0;
+    pllReset();
+    errHistoryAll=[];errHistory2s=[];
+    needInitialSeek=false;
+    awaitingStart=false;
+    wasPlaying=false;
+    return;
+  }
+
+  // --- Pause State ---
+  if(msg.state==='pause'){
+    log('STATE: pause');
+    audio.pause();
+    audio.playbackRate=1.0;
+    pllReset();
+    errHistoryAll=[];errHistory2s=[];
+    needInitialSeek=false;
+    awaitingStart=false;
+    return;
+  }
+
+  // --- Playing ---
+  wasPlaying=true;
+
+  // Target position calculation
+  const nowMs=Date.now();
+  const serverMs=Number(msg.server_ms);
+  const rawPosMs=Number(msg.pos_ms||0);
+
+  let targetMs=rawPosMs;
+  const serverOk=Number.isFinite(serverMs)&&serverMs>1e12&&Math.abs(nowMs-serverMs)<300000;
+  if(serverOk){
+    let elapsed;
+    if(clockOffsetValid){
+      elapsed=(nowMs+clockOffset)-serverMs;
+    }else{
+      elapsed=nowMs-serverMs;
+    }
+    if(!Number.isFinite(elapsed))elapsed=0;
+    elapsed=clamp(elapsed,0,300);
+    targetMs=rawPosMs+elapsed;
+  }else{
+    log('SERVER_MS INVALID: '+serverMs+' nowMs='+nowMs+' diff='+Math.abs(nowMs-serverMs));
+  }
+
+  const targetSec=targetMs/1000.0;
+  const localSec=audio.currentTime||0;
+  const errMs=(targetSec-localSec)*1000.0;
+
+  lastRawPosMs=rawPosMs;
+  lastTargetMs=targetMs;
+  lastLocalMs=localSec*1000;
+
+  localEl.textContent=Math.round(localSec*1000);
+  targetEl.textContent=Math.round(targetMs);
+
+  if(lastCorrectionMs>0){
+    const ago=Math.round((nowMs-lastCorrectionMs)/1000);
+    lastCorrectionEl.textContent=ago+'s ago';
+  }
+  playLatencyEl.textContent=Math.round(playLatencyMs);
+
+  // Gate: wait for clock offset calibration
+  if(offsetHistory.length<MIN_OFFSET_SAMPLES){
+    errEl.textContent='(clock cal '+offsetHistory.length+'/'+MIN_OFFSET_SAMPLES+')';
+    if(++logThrottle%10===0)log('CLOCK CAL: '+offsetHistory.length+'/'+MIN_OFFSET_SAMPLES+' offset samples');
+    return;
+  }
+
+  // Immediate start
+  if(needInitialSeek&&haveMetadata){
+    needInitialSeek=false;
+    audio.currentTime=clamp(targetSec,0,Math.max(0,audio.duration-0.1));
+    log('PLAY NOW: seek to '+Math.round(targetSec*1000)+'ms, PLL will converge after settle');
+    sendReport('INITIAL_SEEK',errMs,1.0);
+    settleUntil=nowMs+1500;
+    effRateWallMs=nowMs;
+    effRateLocalMs=targetSec*1000;
+    playCallWallMs=Date.now();
+    playCallAudioPos=audio.currentTime;
+    playAttempting=true;
+    safePlay().finally(()=>{playAttempting=false;});
+    sendReport('START',0,1.0);
+    return;
+  }
+
+  if(needInitialSeek){
+    return;
+  }
+
+  // Settle period (1.5s)
+  if(nowMs<settleUntil){
+    if(playCallWallMs>0&&audio.currentTime!==playCallAudioPos){
+      const measuredMs=Date.now()-playCallWallMs;
+      playLatencyMs=playLatencyMs>0?(playLatencyMs*0.5+measuredMs*0.5):measuredMs;
+      playLatencyMs=clamp(playLatencyMs,0,500);
+      log('PLAY_LATENCY measured='+measuredMs+'ms estimate='+Math.round(playLatencyMs)+'ms');
+      try{localStorage.setItem(PLAY_LATENCY_KEY,Math.round(playLatencyMs).toString());}catch(e){}
+      playCallWallMs=0;
+    }
+    const sLocalMs=performance.now();
+    const sFppMs=targetMs;
+    if(pll.phase==='idle'){
+      pll.phase='calibrating';
+      pll.samples=[{localMs:sLocalMs,fppMs:sFppMs}];
+      pllStateEl.textContent='calibrating';
+      log('PLL: calibrating during settle');
+    }else if(pll.phase==='calibrating'){
+      pll.samples.push({localMs:sLocalMs,fppMs:sFppMs});
+      pllStateEl.textContent='cal '+pll.samples.length;
+    }
+    errEl.textContent='(settling)';
+    if(++logThrottle%10===0)log('SETTLE remaining='+(settleUntil-nowMs)+'ms samples='+pll.samples.length);
+    return;
+  }
+
+  // Resume if paused
+  if(audio.paused&&!playAttempting){
+    log('PLAY resuming (was paused)');
+    playAttempting=true;
+    safePlay().finally(()=>{playAttempting=false;});
+  }
+
+  // Normal PLL operation
+  errEl.textContent=Math.round(errMs);
+
+  // Error history
+  errHistoryAll.push(errMs);
+  if(errHistoryAll.length>100)errHistoryAll.shift();
+  const avgAll=errHistoryAll.length>0?(errHistoryAll.reduce((a,b)=>a+b,0)/errHistoryAll.length):0;
+  avgErrAllEl.textContent=Math.round(avgAll);
+
+  // 2-second rolling average (PLL error input)
+  errHistory2s.push({t:nowMs,err:errMs});
+  while(errHistory2s.length>0&&(nowMs-errHistory2s[0].t)>2000)errHistory2s.shift();
+  const avg2s=errHistory2s.length>0?(errHistory2s.reduce((a,b)=>a+b.err,0)/errHistory2s.length):0;
+  lastAvg2s=avg2s;
+  avgErr2sEl.textContent=Math.round(avg2s);
+
+  // Buffered data
+  let bufferedSec=0;
+  if(audio.buffered.length>0){bufferedSec=audio.buffered.end(audio.buffered.length-1)-localSec;}
+  bufferedEl.textContent=bufferedSec.toFixed(1);
+
+  if(!haveMetadata||!Number.isFinite(audio.duration)||audio.duration<=0){
+    return;
+  }
+
+  // Effective rate measurement (diagnostic)
+  if(effRateWallMs>0){
+    const dWall=nowMs-effRateWallMs;
+    const dLocal=(localSec*1000)-effRateLocalMs;
+    if(dWall>1000){
+      lastEffRate=dLocal/dWall;
+      effRateEl.textContent=lastEffRate.toFixed(4);
+      effRateWallMs=nowMs;
+      effRateLocalMs=localSec*1000;
+    }
+  }else{
+    effRateWallMs=nowMs;
+    effRateLocalMs=localSec*1000;
+  }
+
+  const localMs=performance.now();
+  const fppMs=targetMs;
+
+  // PLL Phase 1: Idle -> Calibrating
+  if(pll.phase==='idle'){
+    pll.phase='calibrating';
+    pll.samples=[{localMs,fppMs}];
+    audio.playbackRate=1.0;
+    pllStateEl.textContent='calibrating';
+    pllRateEl.textContent='1.000';
+    log('PLL: calibrating (need '+CAL_MIN_MS+'ms window)');
+    sendReport('SYNC',errMs,1.0);
+    return;
+  }
+
+  // PLL Phase 2: Calibrating
+  if(pll.phase==='calibrating'){
+    pll.samples.push({localMs,fppMs});
+    const calSpanMs=pll.samples.length>1?(pll.samples[pll.samples.length-1].localMs-pll.samples[0].localMs):0;
+    pllStateEl.textContent='cal '+Math.round(calSpanMs)+'ms';
+    pllRateEl.textContent='1.000';
+    errEl.textContent=Math.round(errMs)+' (cal)';
+
+    if(calSpanMs>=CAL_MIN_MS&&pll.samples.length>=6){
+      pll.baseRate=linearSlope(pll.samples);
+      if(pll.baseRate<0.99||pll.baseRate>1.01)pll.baseRate=1.0;
+      pll.phase='locked';
+      pll.anchorLocalMs=localMs;
+      pll.anchorFppMs=fppMs;
+      audio.playbackRate=pll.baseRate;
+      pllStateEl.textContent='locked';
+      log('PLL: locked baseRate='+pll.baseRate.toFixed(4)+' err='+Math.round(errMs)+'ms from '+pll.samples.length+' samples over '+Math.round(calSpanMs)+'ms');
+    }
+    sendReport('SYNC',errMs,audio.playbackRate);
+    return;
+  }
+
+  // PLL Phase 3: Locked
+  const phaseErr=targetSec-localSec;
+  pllStateEl.textContent='locked';
+
+  // Hard seek if error > 2s
+  if(Math.abs(phaseErr)>HARD_SEEK_S&&(nowMs-lastSeekMs)>SEEK_COOLDOWN_MS){
+    log('PLL: HARD SEEK err='+Math.round(phaseErr*1000)+'ms (staying locked)');
+    sendReport('CORRECTION',phaseErr*1000,audio.playbackRate);
+    audio.currentTime=clamp(targetSec,0,Math.max(0,audio.duration-0.1));
+    lastSeekMs=nowMs;
+    lastCorrectionMs=nowMs;
+    pll.anchorLocalMs=localMs;
+    pll.anchorFppMs=fppMs;
+    errHistoryAll=[];errHistory2s=[];
+    if(audio.paused&&!playAttempting){
+      playAttempting=true;
+      safePlay().finally(()=>{playAttempting=false;});
+    }
+    return;
+  }
+
+  // Adaptive proportional controller with log-compressed correction
+  const absAvg2s=Math.abs(lastAvg2s);
+  const Kp=Kp_BASE*(1+Kp_SCALE*Math.min(absAvg2s/200,1));
+  const rateInterval=absAvg2s>50?500:1000;
+  pllStateEl.textContent='locked Kp='+Kp.toFixed(3);
+
+  if((nowMs-pll.lastRateUpdateMs)>=rateInterval){
+    pll.lastRateUpdateMs=nowMs;
+    let rate=pll.baseRate;
+    if(absAvg2s>DEAD_ZONE_MS){
+      rate=pll.baseRate+Math.sign(lastAvg2s)*Kp*Math.log1p((absAvg2s-DEAD_ZONE_MS)/LOG_SCALE_MS);
+    }
+    rate=clamp(rate,1-MAX_ADJ,1+MAX_ADJ);
+    if(Math.abs(rate-audio.playbackRate)>MIN_RATE_CHANGE){
+      audio.playbackRate=rate;
+    }
+  }
+  pllRateEl.textContent=audio.playbackRate.toFixed(3);
+
+  // Rate learning
+  const dtLocal=localMs-pll.anchorLocalMs;
+  if(dtLocal>2000){
+    const dtFpp=fppMs-pll.anchorFppMs;
+    const instRate=dtFpp/dtLocal;
+    if(instRate>0.95&&instRate<1.05){
+      pll.baseRate=pll.baseRate*(1-RATE_EMA)+instRate*RATE_EMA;
+    }
+    pll.anchorLocalMs=localMs;
+    pll.anchorFppMs=fppMs;
+  }
+
+  sendReport('SYNC',errMs,audio.playbackRate);
+  if(++logThrottle%20===0)log('PLL err='+Math.round(phaseErr*1000)+'ms rate='+audio.playbackRate.toFixed(3)+'x base='+pll.baseRate.toFixed(4));
+}
+
+// Fetch version (eavesdrop JSON format)
+fetch("./version.php?t=" + Date.now()).then(r => r.json()).then(v => {
+  const verText = "Eavesdrop v" + (v.eavesdrop || "?") + " | FPP v" + (v.fpp || "?");
+  document.getElementById("ver").textContent = verText;
+  document.getElementById("verFooter").textContent = verText;
+}).catch(() => { document.getElementById("ver").textContent = "Version: unknown"; });
+
+// ====== Admin: Playback Controls ======
+function showStatus(el, msg, ok){
+  el.textContent = msg;
+  el.className = "status-msg " + (ok ? "success" : "error");
+  el.style.display = "block";
+  setTimeout(() => { el.style.display = "none"; }, 5000);
+}
+
+async function adminPost(data){
+  const fd = new FormData();
+  for(const k in data) fd.append(k, data[k]);
+  const r = await fetch("./admin.php", { method: "POST", body: fd });
+  return await r.json();
+}
+
+const seqSelect = document.getElementById("seqSelect");
+const startSeqBtn = document.getElementById("startSeq");
+const stopSeqBtn = document.getElementById("stopSeq");
+const seqStatus = document.getElementById("seqStatus");
+
+// Load playlists + sequences on page load
+(async function loadSequences(){
+  try {
+    const res = await adminPost({ action: "get_sequences" });
+    if(!res.success) return;
+    initWiFiCard(res.has_wlan, res.current_ssid, res.ap_iface);
+    seqSelect.innerHTML = '<option value="">-- Select --</option>';
+    if(Array.isArray(res.playlists) && res.playlists.length > 0){
+      const grp = document.createElement("optgroup");
+      grp.label = "Playlists";
+      res.playlists.forEach(s => {
+        const o = document.createElement("option");
+        o.value = s; o.textContent = s;
+        grp.appendChild(o);
+      });
+      seqSelect.appendChild(grp);
+    }
+    if(Array.isArray(res.sequences) && res.sequences.length > 0){
+      const grp = document.createElement("optgroup");
+      grp.label = "Sequences";
+      res.sequences.forEach(s => {
+        const o = document.createElement("option");
+        o.value = s; o.textContent = s;
+        grp.appendChild(o);
+      });
+      seqSelect.appendChild(grp);
+    }
+  } catch(e){ seqSelect.innerHTML = '<option value="">Failed to load</option>'; }
+})();
+
+startSeqBtn.addEventListener("click", async () => {
+  const seq = seqSelect.value;
+  if(!seq){ showStatus(seqStatus, "Select a playlist or sequence first", false); return; }
+  // User tapped Start — this is a gesture, so unlock audio now
+  unlockAudio();
+  startSeqBtn.disabled = true; startSeqBtn.textContent = "Starting...";
+  try {
+    const res = await adminPost({ action: "start_sequence", sequence: seq });
+    showStatus(seqStatus, res.success ? "Started: " + seq : (res.error || "Failed"), res.success);
+  } catch(e){ showStatus(seqStatus, "Network error", false); }
+  startSeqBtn.disabled = false; startSeqBtn.textContent = "Start";
+});
+
+stopSeqBtn.addEventListener("click", async () => {
+  stopSeqBtn.disabled = true; stopSeqBtn.textContent = "Stopping...";
+  try {
+    const res = await adminPost({ action: "stop_playback" });
+    showStatus(seqStatus, res.success ? "Stopped" : (res.error || "Failed"), res.success);
+  } catch(e){ showStatus(seqStatus, "Network error", false); }
+  stopSeqBtn.disabled = false; stopSeqBtn.textContent = "Stop";
+});
+
+
+// ====== Admin: WiFi AP Settings ======
+const optionsCard = document.getElementById("optionsCard");
+const optsToggle = document.getElementById("optsToggle");
+const optsBody = document.getElementById("optsBody");
+const apStatusLine = document.getElementById("apStatusLine");
+const apStatus = document.getElementById("apStatus");
+
+let _noWlan = false;
+optsToggle.addEventListener("click", () => {
+  const open = optsBody.classList.toggle("open");
+  const arrow = open ? "&#9650;" : "&#9660;";
+  const warn = _noWlan ? " — <span style='color:var(--bad)'>No WiFi interface detected</span>" : "";
+  optsToggle.innerHTML = arrow + " WiFi AP Settings" + warn;
+});
+
+// Show WiFi card — with warning if no wlan interface
+function initWiFiCard(hasWlan, currentSSID, apIface) {
+  optionsCard.style.display = "";
+  if (!hasWlan) {
+    _noWlan = true;
+    optsToggle.innerHTML = "&#9660; WiFi AP Settings — <span style='color:var(--bad)'>No WiFi interface detected</span>";
+    apStatusLine.innerHTML = "<span style='color:var(--bad);font-weight:600'>No WiFi interface detected. Settings saved here will apply when an interface is available.</span>";
+    return;
+  }
+  if (apIface) document.getElementById("apIface").value = apIface;
+  if (currentSSID) document.getElementById("newSSID").placeholder = currentSSID;
+  loadAPConfig();
+}
+
+async function loadAPConfig() {
+  try {
+    const res = await adminPost({ action: "get_ap_config" });
+    if (!res.success) return;
+    if (res.ap_iface) {
+      document.getElementById("apIface").value = res.ap_iface;
+      document.getElementById("apIface").dataset.current = res.ap_iface;
+    }
+    if (res.ssid) document.getElementById("newSSID").placeholder = res.ssid;
+    if (res.ip) document.getElementById("newIP").placeholder = res.ip;
+    const sbsLabel = res.ap_iface === 'wlan0' ? ' (SBS)' : '';
+    let statusHtml = "AP " + (res.service_active ? "active" : "inactive") +
+      " | " + esc(res.ap_iface || "?") + sbsLabel +
+      " | SSID: " + esc(res.ssid || "?") + " | IP: " + esc(res.ip || "?");
+    if (res.ap_iface === 'wlan0' && res.tether_label) {
+      const tetherColor = res.tether_state === '2' ? 'var(--good, #4a4)' : 'var(--bad, #f44)';
+      statusHtml += ' | FPP tether: <span style="color:' + tetherColor + '">' + esc(res.tether_label) + '</span>';
+    }
+    if (res.subnet_conflict) {
+      statusHtml += '<div style="color:var(--bad);margin-top:6px;font-weight:600;">&#9888; ' + esc(res.subnet_conflict) + '</div>';
+    }
+    apStatusLine.innerHTML = statusHtml;
+    loadAPClients();
+    initShowAPCard(res.ap_iface);
+  } catch(e) {}
+}
+
+async function loadAPClients() {
+  const el = document.getElementById("clientList");
+  try {
+    const res = await adminPost({ action: "get_ap_clients" });
+    if (!res.success) { el.textContent = "Error loading clients"; return; }
+    if (res.count === 0) { el.textContent = "No clients connected"; return; }
+    let html = "<table style='width:100%;font-size:13px;border-collapse:collapse;'>";
+    html += "<tr style='color:var(--accent);border-bottom:1px solid rgba(255,255,255,.1);'><td style='padding:3px 6px;'>IP</td><td style='padding:3px 6px;'>MAC</td><td style='padding:3px 6px;'>Host</td></tr>";
+    res.clients.forEach(c => {
+      html += "<tr style='border-bottom:1px solid rgba(255,255,255,.04);'>";
+      html += "<td style='padding:3px 6px;'>" + esc(c.ip) + "</td>";
+      html += "<td style='padding:3px 6px;font-family:monospace;font-size:12px;'>" + esc(c.mac) + "</td>";
+      html += "<td style='padding:3px 6px;'>" + esc(c.hostname || "-") + "</td>";
+      html += "</tr>";
+    });
+    html += "</table>";
+    el.innerHTML = html;
+  } catch(e) { el.textContent = "Error loading clients"; }
+}
+function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+document.getElementById("refreshClients").addEventListener("click", loadAPClients);
+
+document.getElementById("applyAP").addEventListener("click", async () => {
+  const iface = document.getElementById("apIface").value;
+  const ssid = document.getElementById("newSSID").value.trim();
+  const pass = document.getElementById("newPass").value;
+  const ip = document.getElementById("newIP").value.trim();
+
+  // Validate fields that have values
+  if (ssid && (ssid.length < 1 || ssid.length > 32)) {
+    showStatus(apStatus, "SSID must be 1-32 characters", false); return;
+  }
+  if (pass && (pass.length < 8 || pass.length > 63)) {
+    showStatus(apStatus, "Password must be 8-63 characters", false); return;
+  }
+  if (ip && !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+    showStatus(apStatus, "Enter a valid IPv4 address", false); return;
+  }
+
+  // Build confirm message
+  let changes = [];
+  if (iface === 'wlan0') changes.push("SBS mode (onboard WiFi) — FPP tether will be disabled");
+  if (ssid) changes.push("SSID: " + ssid);
+  if (pass) changes.push("Password: (changed)");
+  if (ip) changes.push("IP: " + ip);
+  if (changes.length === 0 && iface === document.getElementById("apIface").dataset.current) {
+    showStatus(apStatus, "No changes to apply", false); return;
+  }
+  const msg = "Save and restart AP?\n\n" + (changes.length ? changes.join("\n") : "Restart AP with current settings");
+  if (!confirm(msg)) return;
+
+  const btn = document.getElementById("applyAP");
+  btn.disabled = true; btn.textContent = "Saving...";
+  try {
+    const res = await adminPost({
+      action: "save_ap_config",
+      iface: iface,
+      ssid: ssid || "",
+      password: pass || "",
+      ip: ip || ""
+    });
+    showStatus(apStatus, res.success ? res.message : (res.error || "Failed"), res.success);
+    if (res.success) {
+      document.getElementById("newSSID").value = "";
+      document.getElementById("newPass").value = "";
+      document.getElementById("newIP").value = "";
+      loadAPConfig();
+    }
+  } catch(e) { showStatus(apStatus, "Network error", false); }
+  btn.disabled = false; btn.textContent = "Save & Restart AP";
+});
+
+
+// ====== SBS+ Show AP Settings ======
+const showAPCard = document.getElementById("showAPCard");
+const showAPToggle = document.getElementById("showAPToggle");
+const showAPBody = document.getElementById("showAPBody");
+const showAPStatusLine = document.getElementById("showAPStatusLine");
+const showAPStatus = document.getElementById("showAPStatus");
+const showAPWarning = document.getElementById("showAPWarning");
+
+showAPToggle.addEventListener("click", () => {
+  const open = showAPBody.classList.toggle("open");
+  showAPToggle.innerHTML = (open ? "&#9650;" : "&#9660;") + " SBS+ Public Listener AP";
+});
+
+function initShowAPCard(apIface) {
+  // Only show SBS+ card when eavesdrop is on wlan0 (SBS mode)
+  if (apIface !== "wlan0") {
+    showAPCard.style.display = "none";
+    return;
+  }
+  showAPCard.style.display = "";
+  loadShowAPConfig();
+}
+
+async function loadShowAPConfig() {
+  try {
+    const res = await adminPost({ action: "get_show_ap_config" });
+    if (!res.success) return;
+    document.getElementById("showAPEnabled").checked = res.enabled;
+    if (res.ssid) document.getElementById("showAPSSID").placeholder = res.ssid;
+    if (res.ip) document.getElementById("showAPIP").placeholder = res.ip;
+
+    let statusHtml = "Show AP " + (res.running ? "<span style='color:var(--ok)'>running</span>" : "stopped") +
+      " | " + esc(res.show_iface || "?") +
+      " | SSID: " + esc(res.ssid || "?") +
+      " | IP: " + esc(res.ip || "?");
+    showAPStatusLine.innerHTML = statusHtml;
+
+    // Warning if show interface not detected
+    if (!res.has_show_iface) {
+      showAPWarning.style.display = "";
+      showAPWarning.textContent = "\u26A0 " + (res.show_iface || "wlan1") + " not detected \u2014 plug in a USB WiFi adapter for SBS+ mode.";
+    } else {
+      showAPWarning.style.display = "none";
+    }
+
+    if (res.enabled && res.has_show_iface) loadShowAPClients();
+  } catch(e) {}
+}
+
+async function loadShowAPClients() {
+  const el = document.getElementById("showClientList");
+  try {
+    const res = await adminPost({ action: "get_show_ap_clients" });
+    if (!res.success) { el.textContent = "Error loading clients"; return; }
+    if (res.count === 0) { el.textContent = "No public clients connected"; return; }
+    let html = "<table style='width:100%;font-size:13px;border-collapse:collapse;'>";
+    html += "<tr style='color:var(--accent);border-bottom:1px solid rgba(255,255,255,.1);'><td style='padding:3px 6px;'>IP</td><td style='padding:3px 6px;'>MAC</td><td style='padding:3px 6px;'>Host</td></tr>";
+    res.clients.forEach(c => {
+      html += "<tr style='border-bottom:1px solid rgba(255,255,255,.04);'>";
+      html += "<td style='padding:3px 6px;'>" + esc(c.ip) + "</td>";
+      html += "<td style='padding:3px 6px;font-family:monospace;font-size:12px;'>" + esc(c.mac) + "</td>";
+      html += "<td style='padding:3px 6px;'>" + esc(c.hostname || "-") + "</td>";
+      html += "</tr>";
+    });
+    html += "</table>";
+    el.innerHTML = html;
+  } catch(e) { el.textContent = "Error loading clients"; }
+}
+
+document.getElementById("refreshShowClients").addEventListener("click", loadShowAPClients);
+
+document.getElementById("saveShowAP").addEventListener("click", async () => {
+  const enabled = document.getElementById("showAPEnabled").checked ? "1" : "0";
+  const ssid = document.getElementById("showAPSSID").value.trim();
+  const ip = document.getElementById("showAPIP").value.trim();
+
+  if (ssid && (ssid.length < 1 || ssid.length > 32)) {
+    showStatus(showAPStatus, "SSID must be 1-32 characters", false); return;
+  }
+  if (ip && !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+    showStatus(showAPStatus, "Enter a valid IPv4 address", false); return;
+  }
+
+  let changes = [];
+  changes.push(enabled === "1" ? "Enable SBS+ public AP" : "Disable SBS+ public AP");
+  if (ssid) changes.push("SSID: " + ssid);
+  if (ip) changes.push("IP: " + ip);
+  if (!confirm("Save and restart?\n\n" + changes.join("\n"))) return;
+
+  const btn = document.getElementById("saveShowAP");
+  btn.disabled = true; btn.textContent = "Saving...";
+  try {
+    const res = await adminPost({
+      action: "save_show_ap_config",
+      enabled: enabled,
+      ssid: ssid || "",
+      ip: ip || ""
+    });
+    showStatus(showAPStatus, res.success ? res.message : (res.error || "Failed"), res.success);
+    if (res.success) {
+      document.getElementById("showAPSSID").value = "";
+      document.getElementById("showAPIP").value = "";
+      loadShowAPConfig();
+    }
+  } catch(e) { showStatus(showAPStatus, "Network error", false); }
+  btn.disabled = false; btn.textContent = "Save & Restart";
+});
+
+
+})();
+</script>
+</body>
+</html>

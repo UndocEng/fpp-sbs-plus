@@ -27,20 +27,23 @@ LISTEN_SYNC="/home/fpp/listen-sync"
 # Deploy web files
 echo "[install] Deploying web files..."
 sudo mkdir -p "$WEBROOT/listen"
-sudo cp -f "$ROOT_DIR/www/listen/listen.html" "$WEBROOT/listen/listen.html" 2>/dev/null || \
+sudo cp -f "$ROOT_DIR/www/listen/listen.html" "$WEBROOT/listen/listen.html" 2>/dev/null || true
+sudo cp -f "$ROOT_DIR/www/listen/admin.html" "$WEBROOT/listen/admin.html" 2>/dev/null || \
   sudo cp -f "$ROOT_DIR/www/listen/index.html" "$WEBROOT/listen/index.html" 2>/dev/null || true
 sudo cp -f "$ROOT_DIR/www/listen/status.php" "$WEBROOT/listen/status.php"
 sudo cp -f "$ROOT_DIR/www/listen/admin.php" "$WEBROOT/listen/admin.php"
 sudo cp -f "$ROOT_DIR/www/listen/version.php" "$WEBROOT/listen/version.php"
 sudo cp -f "$ROOT_DIR/www/listen/logo.png" "$WEBROOT/listen/logo.png" 2>/dev/null || true
 sudo cp -f "$ROOT_DIR/www/listen/logo-public.png" "$WEBROOT/listen/logo-public.png" 2>/dev/null || true
-sudo cp -f "$ROOT_DIR/www/listen/public.html" "$WEBROOT/listen/public.html" 2>/dev/null || true
 sudo cp -f "$ROOT_DIR/www/listen/portal-api.php" "$WEBROOT/listen/portal-api.php" 2>/dev/null || true
 sudo cp -f "$ROOT_DIR/www/listen/detect.php" "$WEBROOT/listen/detect.php" 2>/dev/null || true
 sudo cp -f "$ROOT_DIR/VERSION" "$WEBROOT/listen/VERSION" 2>/dev/null || true
 
-# Create index.html redirect if listen.html exists
-if [[ -f "$WEBROOT/listen/listen.html" ]]; then
+# Clean up old public.html from previous installs
+sudo rm -f "$WEBROOT/listen/public.html" 2>/dev/null || true
+
+# Create index.html redirect if admin.html exists (admin page confirms full install)
+if [[ -f "$WEBROOT/listen/admin.html" ]]; then
   echo '<meta http-equiv="refresh" content="0;url=listen.html">' | sudo tee "$WEBROOT/listen/index.html" > /dev/null
 fi
 
@@ -314,7 +317,7 @@ $(document).ready(function() {
                 .html('<i class="fas fa-exclamation-triangle"></i> ' +
                     '<b>SBS Mode Active</b> — wlan0 is running the Eavesdrop listener AP. ' +
                     'Scanning or changing wlan0 settings here will <b>disconnect all listeners</b>. ' +
-                    '<a href="/listen/listen.html" style="color:#6bf;margin-left:4px;">Manage AP in Eavesdrop</a>');
+                    '<a href="/listen/admin.html" style="color:#6bf;margin-left:4px;">Manage AP in Eavesdrop</a>');
             $('h1.title').after(banner);
 
             // Intercept wlan0 selection — warn before scan fires
@@ -400,7 +403,7 @@ echo "  Pass:  Listen123 (change via web UI)"
 fi
 if [[ "$SHOW_ENABLED" == "1" ]]; then
   echo "  SBS+:  ${SHOW_SSID} (open) on ${SHOW_IF:-wlan1}"
-  echo "         Public page: http://${SHOW_IP}/listen/public.html"
+  echo "         Public page: http://${SHOW_IP}/listen/"
 else
   echo "  SBS+:  Disabled (enable via web UI)"
 fi

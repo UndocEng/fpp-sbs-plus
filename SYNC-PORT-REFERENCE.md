@@ -12,7 +12,7 @@ by a fresh Claude session working in the eavesdrop repo.
 
 ## Target Repo
 - `c:\Users\TNash\Documents\GitHub\fpp-eavesdrop`
-- Key file: `www/listen/listen.html` — all sync JS is inline (~580 lines)
+- Key file: `www/listen/admin.html` — admin page with sync JS inline (~580 lines)
 - Keep: admin UI (start/stop sequences, WiFi SSID/password), version display
 - Replace: entire sync algorithm JS + add debug UI
 
@@ -274,7 +274,7 @@ Events: TRACK, INITIAL_SEEK, START, SYNC (throttled 1/sec), CORRECTION, STOP (on
 ## Files to Create/Modify in Eavesdrop
 
 ### Modify:
-- `www/listen/listen.html` — Replace sync JS, add debug UI HTML, keep admin UI (start/stop, WiFi settings)
+- `www/listen/admin.html` — Replace sync JS, add debug UI HTML, keep admin UI (start/stop, WiFi settings)
 - `www/listen/status.php` — Ensure format matches (already close, check `milliseconds_elapsed` and `round()`)
 - `install.sh` — Add ws-sync-server.py deployment, systemd service, Apache proxy config, `a2enmod proxy proxy_wstunnel`
 
