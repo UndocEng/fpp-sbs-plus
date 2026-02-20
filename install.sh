@@ -272,6 +272,17 @@ if [[ -f "$ROOT_DIR/config/apache-listener.conf" ]]; then
   echo "[install] Apache listener config deployed"
 fi
 
+# Inject IncludeOptional into FPP's VirtualHost for SBS+ rewrite rules.
+# Server-level rewrites outside a VirtualHost don't apply to VirtualHost requests,
+# so the show-rewrite.conf must be included INSIDE the <VirtualHost *:80> block.
+FPP_VHOST="/etc/apache2/sites-available/000-default.conf"
+if [[ -f "$FPP_VHOST" ]] && ! grep -q 'show-rewrite.conf' "$FPP_VHOST" 2>/dev/null; then
+  sudo sed -i '/<VirtualHost \*:80>/a \\tIncludeOptional /home/fpp/listen-sync/show-rewrite.conf' "$FPP_VHOST"
+  echo "[install] SBS+ rewrite rules injected into FPP VirtualHost"
+else
+  echo "[install] SBS+ rewrite rules already in FPP VirtualHost"
+fi
+
 # Restart Apache to apply changes
 sudo systemctl restart apache2 2>/dev/null || sudo apachectl restart 2>/dev/null || true
 echo "[install] Apache restarted"
