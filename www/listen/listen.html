@@ -528,10 +528,8 @@ function connectWebSocket(){
     try{
       const data=JSON.parse(event.data);
       if(data.type==='pong'){
-        // Clock sync response — update offset estimate
         handlePong(data);
       }else if(data.state!==undefined){
-        // FPP state broadcast — run sync algorithm
         sync(data);
       }
     }catch(e){}
@@ -844,7 +842,9 @@ async function syncInner(msg){
       elapsed=nowMs-serverMs;
     }
     if(!Number.isFinite(elapsed))elapsed=0;
-    elapsed=clamp(elapsed,0,300);  // 0–300ms is a reasonable transit time
+    // Discard hopelessly stale messages; use real elapsed for accurate targeting
+    if(elapsed>2000){return;}
+    if(elapsed<0)elapsed=0;
     targetMs=rawPosMs+elapsed;
   }else{
     log('SERVER_MS INVALID: '+serverMs+' nowMs='+nowMs+' diff='+Math.abs(nowMs-serverMs));

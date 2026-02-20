@@ -33,6 +33,9 @@ sudo ip addr flush dev "$WLAN_IF" || true
 sudo ip addr add "$AP_IP/$AP_MASK" dev "$WLAN_IF"
 sudo ip link set "$WLAN_IF" up
 
+# Disable power save — AP must stay awake or clients (WLED bulbs, phones) get dropped
+/sbin/iw dev "$WLAN_IF" set power_save off 2>/dev/null || true
+
 # Use persistent hostapd config (SSID/password changeable via web UI)
 HOSTAPD_CONF="/home/fpp/listen-sync/hostapd-listener.conf"
 

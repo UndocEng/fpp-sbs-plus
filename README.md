@@ -133,7 +133,7 @@ sudo ./install.sh
 You should see output like this:
 ```
 =========================================
-  FPP Eavesdrop - v3.4
+  FPP Eavesdrop - v3.6
 =========================================
 
 [install] Web root: /opt/fpp/www

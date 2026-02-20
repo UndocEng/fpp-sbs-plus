@@ -687,7 +687,9 @@ async function syncInner(msg){
       elapsed=nowMs-serverMs;
     }
     if(!Number.isFinite(elapsed))elapsed=0;
-    elapsed=clamp(elapsed,0,300);
+    // Discard hopelessly stale messages; use real elapsed for accurate targeting
+    if(elapsed>2000){return;}
+    if(elapsed<0)elapsed=0;
     targetMs=rawPosMs+elapsed;
   }else{
     log('SERVER_MS INVALID: '+serverMs+' nowMs='+nowMs+' diff='+Math.abs(nowMs-serverMs));

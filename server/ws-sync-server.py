@@ -229,23 +229,25 @@ def parse_fpp_state(src, server_ms):
 
 
 async def broadcast(message):
-    """Send a JSON message to all connected WebSocket clients.
+    """Send a JSON message to all connected WebSocket clients concurrently.
 
-    Phones that have disconnected (but we haven't gotten the close event yet)
-    will throw ConnectionClosed -- we catch that and remove them from the set.
-    This runs every 100ms (on each FPP poll tick), so dead client cleanup
-    happens quickly.
+    Uses asyncio.gather so a slow client (e.g. wlan1 with USB WiFi congestion)
+    cannot delay messages to fast clients (e.g. admin on wlan0).
+    Dead connections (ConnectionClosed) are removed from the client set.
     """
     if not clients:
         return
     dead = set()
-    for ws in list(clients):
+
+    async def _send(ws):
         try:
             await ws.send(message)
         except websockets.ConnectionClosed:
             dead.add(ws)
         except Exception:
             dead.add(ws)
+
+    await asyncio.gather(*(_send(ws) for ws in list(clients)))
     clients.difference_update(dead)
 
 
