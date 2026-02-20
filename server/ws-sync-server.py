@@ -50,10 +50,10 @@ except ImportError:
     raise SystemExit(1)
 
 # --- Configuration ---
-FPP_API_URL = "http://127.0.0.1/api/fppd/status"  # FPP's local REST API
+FPP_API_URL = "http://127.0.0.1/api/fppd/status"  # FPP's local REST API (through Apache)
 WS_HOST = "0.0.0.0"           # Listen on all interfaces
 WS_PORT = 8080                 # Apache proxies /ws on port 80 to here
-POLL_INTERVAL_MS = 100         # Poll FPP API every 100ms -- fast enough for smooth sync
+POLL_INTERVAL_MS = 200         # Poll FPP API every 200ms -- balances sync accuracy with Pi load
 MUSIC_DIR = Path("/home/fpp/media/music")  # Where FPP stores music files
 AUDIO_FORMATS = ["mp3", "m4a", "mp4", "aac", "ogg", "wav"]  # Supported audio formats
 SYNC_LOG_PATH = Path("/home/fpp/listen-sync/sync.log")  # Client sync report log
@@ -239,7 +239,7 @@ async def broadcast(message):
     if not clients:
         return
     dead = set()
-    for ws in clients:
+    for ws in list(clients):
         try:
             await ws.send(message)
         except websockets.ConnectionClosed:

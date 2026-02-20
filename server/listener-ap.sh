@@ -3,7 +3,7 @@
 # Brings up the eavesdrop admin AP (WPA2) and optionally the SBS+ public listener AP (open).
 # Adjust settings via /home/fpp/listen-sync/ap.conf or the web UI.
 
-set -euo pipefail
+set -uo pipefail
 
 # Source persistent AP config (IP, netmask, show AP settings)
 AP_CONF="/home/fpp/listen-sync/ap.conf"
@@ -72,6 +72,7 @@ DHCP_END="${o1}.${o2}.${o3}.200"
 DNSMASQ_CONF="/tmp/listener-dnsmasq.conf"
 cat > "$DNSMASQ_CONF" <<EOF
 interface=$WLAN_IF
+except-interface=lo
 bind-interfaces
 dhcp-range=${DHCP_START},${DHCP_END},12h
 dhcp-option=3,$AP_IP
@@ -151,19 +152,23 @@ if [[ ! -e "/sys/class/net/$SHOW_IF" ]]; then
   exit 0
 fi
 
-# Configure show interface IP
-sudo ip link set "$SHOW_IF" down || true
-sudo ip addr flush dev "$SHOW_IF" || true
-sudo ip addr add "$SHOW_AP_IP/$SHOW_AP_MASK" dev "$SHOW_IF"
-sudo ip link set "$SHOW_IF" up
+# --- Show AP setup in a subshell so failures don't kill eavesdrop ---
+(
+  set -e
 
-# Use persistent show hostapd config
-SHOW_HOSTAPD="/home/fpp/listen-sync/hostapd-show.conf"
+  # Configure show interface IP
+  sudo ip link set "$SHOW_IF" down || true
+  sudo ip addr flush dev "$SHOW_IF" || true
+  sudo ip addr add "$SHOW_AP_IP/$SHOW_AP_MASK" dev "$SHOW_IF"
+  sudo ip link set "$SHOW_IF" up
 
-# Create default config if missing
-if [[ ! -f "$SHOW_HOSTAPD" ]]; then
-  echo "[listener-ap] Creating default show AP hostapd config"
-  sudo tee "$SHOW_HOSTAPD" > /dev/null <<EOF
+  # Use persistent show hostapd config
+  SHOW_HOSTAPD="/home/fpp/listen-sync/hostapd-show.conf"
+
+  # Create default config if missing
+  if [[ ! -f "$SHOW_HOSTAPD" ]]; then
+    echo "[listener-ap] Creating default show AP hostapd config"
+    sudo tee "$SHOW_HOSTAPD" > /dev/null <<CONFEOF
 interface=$SHOW_IF
 driver=nl80211
 ssid=$SHOW_AP_SSID
@@ -176,61 +181,60 @@ auth_algs=1
 ignore_broadcast_ssid=0
 wpa=0
 ap_isolate=1
-EOF
-  sudo chmod 644 "$SHOW_HOSTAPD"
-else
-  # Ensure interface line matches the derived show interface
-  sudo sed -i "s/^interface=.*/interface=$SHOW_IF/" "$SHOW_HOSTAPD"
-fi
+CONFEOF
+    sudo chmod 644 "$SHOW_HOSTAPD"
+  else
+    # Ensure interface line matches the derived show interface
+    sudo sed -i "s/^interface=.*/interface=$SHOW_IF/" "$SHOW_HOSTAPD"
+  fi
 
-# Start show AP hostapd
-echo "[listener-ap] Starting show AP hostapd..."
-sudo pkill -f "hostapd-show.conf" || true
-sudo hostapd "$SHOW_HOSTAPD" -B
+  # Start show AP hostapd
+  echo "[listener-ap] Starting show AP hostapd..."
+  sudo pkill -f "hostapd-show.conf" || true
+  sudo hostapd "$SHOW_HOSTAPD" -B
 
-# dnsmasq for show AP (separate instance, separate interface)
-IFS='.' read -r s1 s2 s3 s4 <<< "$SHOW_AP_IP"
-SHOW_DHCP_START="${s1}.${s2}.${s3}.10"
-SHOW_DHCP_END="${s1}.${s2}.${s3}.200"
+  # dnsmasq for show AP (separate instance, separate interface)
+  IFS='.' read -r s1 s2 s3 s4 <<< "$SHOW_AP_IP"
+  SHOW_DHCP_START="${s1}.${s2}.${s3}.10"
+  SHOW_DHCP_END="${s1}.${s2}.${s3}.200"
 
-SHOW_DNSMASQ_CONF="/tmp/show-dnsmasq.conf"
-cat > "$SHOW_DNSMASQ_CONF" <<EOF
+  SHOW_DNSMASQ_CONF="/tmp/show-dnsmasq.conf"
+  cat > "$SHOW_DNSMASQ_CONF" <<DNSEOF
 interface=$SHOW_IF
+except-interface=lo
 bind-interfaces
 dhcp-range=${SHOW_DHCP_START},${SHOW_DHCP_END},12h
 dhcp-option=3,$SHOW_AP_IP
 dhcp-option=6,$SHOW_AP_IP
 dhcp-option=114,http://$SHOW_AP_IP/listen/portal-api.php
 address=/#/$SHOW_AP_IP
-EOF
+DNSEOF
 
-echo "[listener-ap] Starting show AP dnsmasq..."
-sudo pkill -f "show-dnsmasq.conf" || true
-sudo dnsmasq --conf-file="$SHOW_DNSMASQ_CONF"
+  echo "[listener-ap] Starting show AP dnsmasq..."
+  sudo pkill -f "show-dnsmasq.conf" || true
+  sudo dnsmasq --conf-file="$SHOW_DNSMASQ_CONF"
 
-# Deploy captive portal .htaccess (from template with IP substitution)
-HTACCESS_TEMPLATE="/home/fpp/listen-sync/htaccess-show.template"
-if [[ -f "$HTACCESS_TEMPLATE" ]]; then
-  # Compute show subnet prefix (e.g., 192.168.60.)
-  SHOW_SUBNET="${s1}\\.${s2}\\.${s3}\\."
-  SHOW_SUBNET_EXCLUDE="(?!${s3}\\.)"
-  sudo sed \
-    -e "s/__SHOW_AP_IP__/$SHOW_AP_IP/g" \
-    -e "s/__SHOW_SUBNET_ESC__/${s1}\\\\.${s2}\\\\.${s3}\\\\./g" \
-    -e "s/__SHOW_SUBNET_OCTET__/${s3}/g" \
-    "$HTACCESS_TEMPLATE" | sudo tee /opt/fpp/www/.htaccess > /dev/null
-  echo "[listener-ap] Captive portal .htaccess deployed"
-else
-  echo "[listener-ap] WARNING: .htaccess template not found, captive portal redirects may not work"
-fi
+  # Deploy captive portal .htaccess (from template with IP substitution)
+  HTACCESS_TEMPLATE="/home/fpp/listen-sync/htaccess-show.template"
+  if [[ -f "$HTACCESS_TEMPLATE" ]]; then
+    # Compute show subnet prefix (e.g., 192.168.60.)
+    sudo sed \
+      -e "s/__SHOW_AP_IP__/$SHOW_AP_IP/g" \
+      -e "s/__SHOW_SUBNET_ESC__/${s1}\\\\.${s2}\\\\.${s3}\\\\./g" \
+      -e "s/__SHOW_SUBNET_OCTET__/${s3}/g" \
+      "$HTACCESS_TEMPLATE" | sudo tee /opt/fpp/www/.htaccess > /dev/null
+    echo "[listener-ap] Captive portal .htaccess deployed"
+  else
+    echo "[listener-ap] WARNING: .htaccess template not found, captive portal redirects may not work"
+  fi
 
-# nftables security firewall for show AP
-# Phones on the show AP can ONLY reach: DHCP, DNS, HTTP, WebSocket on the Pi
-# Everything else is REJECTed (fast fail for captive portal detection)
-echo "[listener-ap] Setting up show AP firewall..."
-sudo nft delete table inet show_ap 2>/dev/null || true
+  # nftables security firewall for show AP
+  # Phones on the show AP can ONLY reach: DHCP, DNS, HTTP, WebSocket on the Pi
+  # Everything else is REJECTed (fast fail for captive portal detection)
+  echo "[listener-ap] Setting up show AP firewall..."
+  sudo nft delete table inet show_ap 2>/dev/null || true
 
-sudo nft -f - <<NFT
+  sudo nft -f - <<NFT
 table inet show_ap {
   # Conntrack routing (same pattern as eavesdrop, different mark)
   chain prerouting {
@@ -252,14 +256,25 @@ table inet show_ap {
     meta l4proto tcp reject with tcp reset
     reject
   }
+  # Block show AP clients from reaching other networks (wlan0, eth0, etc.)
+  chain show_forward {
+    type filter hook forward priority 0; policy accept;
+    iifname "$SHOW_IF" drop
+  }
 }
 NFT
 
-# Policy route for show AP (separate table)
-sudo ip rule del fwmark 0xC8 table 200 2>/dev/null || true
-sudo ip rule add fwmark 0xC8 table 200
-sudo ip route replace "${s1}.${s2}.${s3}.0/${SHOW_AP_MASK}" dev "$SHOW_IF" table 200
+  # Policy route for show AP (separate table)
+  sudo ip rule del fwmark 0xC8 table 200 2>/dev/null || true
+  sudo ip rule add fwmark 0xC8 table 200
+  sudo ip route replace "${s1}.${s2}.${s3}.0/${SHOW_AP_MASK}" dev "$SHOW_IF" table 200
 
-SHOW_SSID=$(grep '^ssid=' "$SHOW_HOSTAPD" 2>/dev/null | cut -d= -f2 || echo "$SHOW_AP_SSID")
-echo "[listener-ap] Show AP up (SSID: ${SHOW_SSID}, IP: ${SHOW_AP_IP}, open, firewalled)"
-echo "[listener-ap] SBS+ mode active: eavesdrop on $WLAN_IF + public listener on $SHOW_IF"
+  SHOW_SSID=$(grep '^ssid=' "$SHOW_HOSTAPD" 2>/dev/null | cut -d= -f2 || echo "$SHOW_AP_SSID")
+  echo "[listener-ap] Show AP up (SSID: ${SHOW_SSID}, IP: ${SHOW_AP_IP}, open, firewalled)"
+  echo "[listener-ap] SBS+ mode active: eavesdrop on $WLAN_IF + public listener on $SHOW_IF"
+)
+
+if [[ $? -ne 0 ]]; then
+  echo "[listener-ap] ERROR: Show AP setup failed -- eavesdrop AP is still running"
+  echo "[listener-ap] Check 'journalctl -u listener-ap' for details"
+fi
