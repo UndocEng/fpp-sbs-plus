@@ -20,7 +20,7 @@ function fppeavesdropHeaderIndicator() {
         'icon' => 'fa-headphones',
         'color' => '#D4A030',
         'tooltip' => 'Eavesdrop Listen Page',
-        'link' => '/listen/listen.html',
+        'link' => '/listen/admin.html',
         'animate' => ''
     ));
 }

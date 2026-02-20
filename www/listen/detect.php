@@ -19,7 +19,7 @@
  */
 
 $ip = $_SERVER['SERVER_ADDR'] ?? '192.168.60.1';
-$redirect = "http://$ip/listen/public.html";
+$redirect = "http://$ip/listen/listen.html";
 $uri = $_SERVER['REQUEST_URI'] ?? '';
 
 // Android/Chrome checks for generate_204 (expects HTTP 204 No Content)

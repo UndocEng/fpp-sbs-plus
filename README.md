@@ -4,7 +4,7 @@ A **show-owner developer tool** for Falcon Player (FPP). Runs on the master Pi a
 
 > **Tested on FPP 9.4** (Raspberry Pi OS Bookworm). Should work on any FPP version that uses `/opt/fpp/www/` as its web root (FPP 6+).
 
-> **This is NOT the visitor-facing listener.** For an open WiFi hotspot that lets your audience listen along while keeping connected deviices isoolated and blocking FPP from intrusion, see [fpp-listener-sync](https://github.com/UndocEng/fpp-listener-sync) (runs on a remote). **Eavesdrop** runs on the master with direct API access.
+> **SBS+ Mode**: This repo includes an optional **public listener AP** for audience phones. Enable SBS+ to run both admin and public APs on one Pi — no remote needed. See [Dual-AP (SBS+ Mode)](#dual-ap-sbs-mode) below.
 
 ---
 
@@ -14,8 +14,37 @@ A **show-owner developer tool** for Falcon Player (FPP). Runs on the master Pi a
 2. Syncs show audio to the owner's phone using an adaptive PLL with WebSocket transport
 3. Registers as an FPP plugin with a header icon and footer button for quick access 
 4. Auto-detects when sequences start from any source (FPP web UI, scheduler, API) and begins playing
-5. Optional WiFi access point (wlan1) — I developed this to run a couple of WLED bulbs without needing a separate AP. I don't recommend it for shows that transmit a lot of pixel data or use remotes
-6. Accessible from your show network — just click the navigate to `http://YOUR_FPP_IP/listen/` or the new button/icon.
+5. Built-in WiFi access point on wlan0 (SBS mode) — runs E1.31 devices (WLED bulbs) and the admin listener on one AP without needing a separate router
+6. Optional SBS+ mode — adds a second AP on wlan1 (USB adapter) for audience phones to hear synced audio via captive portal
+7. Accessible from your show network — navigate to `http://YOUR_FPP_IP/listen/` or use the FPP header icon / footer button
+
+---
+
+## Dual-AP (SBS+ Mode)
+
+SBS+ runs **two WiFi access points** on one Raspberry Pi — one for the show owner, one for the audience:
+
+| AP | Interface | SSID (default) | Security | Purpose |
+|----|-----------|---------------|----------|---------|
+| **Eavesdrop** | wlan0 (onboard) | `EAVESDROP` | WPA2 | Admin control page + E1.31 show devices (WLED bulbs, controllers) |
+| **Public Listener** | wlan1 (USB adapter) | `SHOW_AUDIO` | Open | Audience phones hear synced show audio via captive portal |
+
+**How it works:**
+- The admin connects to **EAVESDROP** (WPA2) and opens `admin.html` to control the show
+- Audience phones connect to **SHOW_AUDIO** (open WiFi) and are automatically redirected to the listen page via captive portal
+- The two networks are **fully isolated** — phones on SHOW_AUDIO cannot reach admin pages, FPP settings, or devices on the eavesdrop network
+- Both APs share the same WebSocket sync server, so all clients stay in sync
+
+**To enable SBS+ mode:**
+1. Plug in a USB WiFi adapter (for wlan1)
+2. Open the admin page → SBS+ Settings card → check "Enable"
+3. Save & Restart
+
+### QR Codes
+
+If you previously used [fpp-listener-sync](https://github.com/UndocEng/fpp-listener-sync) and generated QR codes with its `qrcode.html` page, those QR codes will continue to work. They point to `http://<AP_IP>/listen/` which redirects to `listen.html` — the public listen page.
+
+To access the **admin page** directly, navigate to `http://<AP_IP>/listen/admin.html`.
 
 ---
 ## Support This Project
@@ -43,7 +72,7 @@ This must be installed on your **master** FPP (the one in **player mode**), not 
 - Direct access to the music files in `/home/fpp/media/music/`
 - The FPP API at `127.0.0.1` to read playback status and start/stop playlists
 - Remotes don't have to store media locally — they only receive channel data from the master. Typically, there is no media to play on a remote.
-- No seperate USB wifi adapter is needed
+- No USB WiFi adapter needed for basic SBS mode. For SBS+ (audience listener AP), plug in a USB WiFi adapter for wlan1
 
 If your master controls the show, that's where this goes.
 
@@ -104,7 +133,7 @@ sudo ./install.sh
 You should see output like this:
 ```
 =========================================
-  FPP Eavesdrop - v3.4
+  FPP Eavesdrop - v3.6
 =========================================
 
 [install] Web root: /opt/fpp/www
@@ -152,9 +181,9 @@ That's it! You're done.
 
 ## How to Use It
 
-### Starting a show
+### Starting a show (admin)
 
-1. Open the listen page at `http://YOUR_FPP_IP/listen/`
+1. Open the admin page at `http://YOUR_FPP_IP/listen/admin.html`
 2. Pick a playlist or sequence from the dropdown
 3. Tap **Start**
 4. Audio will play through the phone speaker and lights will run on your display
@@ -250,19 +279,25 @@ rm -rf /home/fpp/fpp-eavesdrop
 
 | File | What it does |
 |------|-------------|
-| `www/listen/listen.html` | Main page — playback controls, audio sync, WiFi AP settings, debug UI |
+| `www/listen/listen.html` | Public listen page — audio sync, now playing display, debug UI (audience-facing) |
+| `www/listen/admin.html` | Admin page — playback controls, WiFi AP settings, SBS+ config, debug UI (owner-facing) |
 | `www/listen/index.html` | Redirects to listen.html |
 | `www/listen/status.php` | Returns current FPP playback status as JSON |
-| `www/listen/admin.php` | Handles start/stop commands, WiFi AP config (SSID, password, IP), connected clients |
+| `www/listen/admin.php` | Backend — start/stop commands, WiFi AP config (SSID, password, IP), connected clients |
 | `www/listen/version.php` | Returns version info |
-| `www/listen/logo.png` | Undocumented Engineer logo |
-| `server/ws-sync-server.py` | Python WebSocket server — bridges FPP status to clients at 100ms |
-| `server/listener-ap.sh` | Brings up WPA2 access point on wlan1 with hostapd, dnsmasq, and nftables routing |
-| `server/listener-ap.service` | Systemd service for the WiFi access point |
+| `www/listen/portal-api.php` | Captive portal API (RFC 8908) for SBS+ show AP |
+| `www/listen/detect.php` | Legacy captive portal detection fallback |
+| `www/listen/logo.png` | Eavesdrop logo (gold/amber, admin page) |
+| `www/listen/logo-public.png` | Public listener logo (blue/cyan, listen page) |
+| `www/.htaccess-show` | Captive portal redirect template for SBS+ show AP |
+| `server/ws-sync-server.py` | Python WebSocket server — bridges FPP status to clients at 200ms |
+| `server/listener-ap.sh` | Brings up eavesdrop AP on wlan0, optionally show AP on wlan1 (SBS+) |
+| `server/listener-ap.service` | Systemd service for the WiFi access point(s) |
 | `config/ws-sync.service` | Systemd service for the WebSocket server |
 | `config/apache-listener.conf` | Apache config — proxies `/ws` to the WebSocket server |
-| `config/ap.conf` | Default AP IP/netmask template (deployed if not present on Pi) |
-| `api.php` | FPP plugin API — header indicator icon linking to the listen page |
+| `config/ap.conf` | Default AP config template (eavesdrop + SBS+ settings) |
+| `config/hostapd-show.conf` | Default hostapd config for SBS+ public AP (open WiFi, ap_isolate=1) |
+| `api.php` | FPP plugin API — header indicator icon linking to admin page |
 | `pluginInfo.json` | FPP plugin metadata for plugin manager registration |
 | `install.sh` | Installs everything (web files, services, AP, plugin, sudoers) |
 | `uninstall.sh` | Removes everything (restores FPP to original state) |
