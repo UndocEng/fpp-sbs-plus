@@ -40,6 +40,9 @@ CPUQuota=25%
 
 # Security: prevent the process from gaining new privileges (e.g., via setuid)
 NoNewPrivileges=true
+# Allow the process to set the system clock (for admin clock-set feature)
+# CAP_SYS_TIME lets date(1) work without sudo, compatible with NoNewPrivileges
+AmbientCapabilities=CAP_SYS_TIME
 
 [Install]
 WantedBy=multi-user.target

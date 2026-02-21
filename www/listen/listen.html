@@ -830,8 +830,9 @@ async function syncInner(msg){
   const rawPosMs=Number(msg.pos_ms||0);
 
   let targetMs=rawPosMs;
-  // Sanity check: server_ms should be a Unix timestamp (>1e12) and within 5min of now
-  const serverOk=Number.isFinite(serverMs)&&serverMs>1e12&&Math.abs(nowMs-serverMs)<300000;
+  // Use clock offset for serverOk check when available (Pi may have wrong clock — no RTC/NTP)
+  const timeDiff=clockOffsetValid?Math.abs((nowMs+clockOffset)-serverMs):Math.abs(nowMs-serverMs);
+  const serverOk=Number.isFinite(serverMs)&&serverMs>1e12&&timeDiff<300000;
   if(serverOk){
     let elapsed;
     if(clockOffsetValid){

@@ -66,6 +66,14 @@
     .box{ margin-top:8px; padding:12px; border:1px solid rgba(255,255,255,.06); border-radius:12px; background:rgba(0,0,0,.14); font-size:13px; color:var(--muted); }
     .box b{ color:var(--ink); opacity:.8; }
     .hidden{ display:none; }
+    .clock-warn{
+      margin-top:16px; padding:14px; border-radius:12px;
+      background:rgba(255,77,77,.12); border:1px solid var(--bad);
+      text-align:center; font-size:14px; color:var(--ink);
+    }
+    .clock-warn b{ color:var(--bad); }
+    .clock-warn .cw-btns{ margin-top:10px; display:flex; gap:10px; justify-content:center; }
+    .clock-warn .cw-btns button{ width:auto; padding:8px 24px; font-size:14px; }
   </style>
 </head>
 <body>
@@ -87,6 +95,16 @@
       <button id="stopSeq">Stop</button>
     </div>
     <div id="seqStatus" class="status-msg"></div>
+  </div>
+
+  <!-- Clock Warning -->
+  <div id="clockWarn" class="clock-warn hidden">
+    <b>&#9888; Pi clock is wrong</b>
+    <div id="clockWarnMsg" style="margin-top:6px;color:var(--muted);font-size:13px;"></div>
+    <div class="cw-btns">
+      <button id="clockYes" style="border-color:var(--ok);color:var(--ok);">Yes, set clock</button>
+      <button id="clockNo" style="border-color:var(--muted);color:var(--muted);">No</button>
+    </div>
   </div>
 
   <!-- Sync Status -->
@@ -409,7 +427,48 @@ function updateClockOffset(serverTs, clientSendTs, rtt){
     clockOffset=clockOffset*0.7+median*0.3;
   }
   offsetEl.textContent=Math.round(clockOffset);
+  // Check for large clock mismatch (Pi clock wrong after reboot, no RTC/NTP)
+  checkClockMismatch();
 }
+
+// =============================================================================
+// CLOCK MISMATCH DETECTION (Pi has no RTC, loses time on reboot)
+// =============================================================================
+let clockWarnShown=false, clockWarnDismissed=false;
+function checkClockMismatch(){
+  if(clockWarnDismissed||clockWarnShown||!clockOffsetValid)return;
+  if(offsetHistory.length<MIN_OFFSET_SAMPLES)return;
+  const absOff=Math.abs(clockOffset);
+  if(absOff<60000)return; // less than 1 minute — fine
+  clockWarnShown=true;
+  const offSec=Math.abs(clockOffset)/1000;
+  let desc;
+  if(offSec>86400){
+    const days=Math.round(offSec/86400);
+    desc=days+' day'+(days!==1?'s':'');
+  }else if(offSec>3600){
+    const hrs=Math.round(offSec/3600);
+    desc=hrs+' hour'+(hrs!==1?'s':'');
+  }else{
+    const mins=Math.round(offSec/60);
+    desc=mins+' minute'+(mins!==1?'s':'');
+  }
+  document.getElementById('clockWarnMsg').textContent=
+    'Pi clock is off by ~'+desc+'. Set it from your phone?';
+  document.getElementById('clockWarn').classList.remove('hidden');
+}
+document.getElementById('clockYes').onclick=function(){
+  if(ws&&ws.readyState===WebSocket.OPEN){
+    ws.send(JSON.stringify({type:'set_clock',client_ms:Date.now()}));
+    document.getElementById('clockWarnMsg').textContent='Setting clock...';
+    document.getElementById('clockYes').disabled=true;
+    document.getElementById('clockNo').disabled=true;
+  }
+};
+document.getElementById('clockNo').onclick=function(){
+  clockWarnDismissed=true;
+  document.getElementById('clockWarn').classList.add('hidden');
+};
 
 // =============================================================================
 // WEBSOCKET CONNECTION (primary transport)
@@ -443,6 +502,21 @@ function connectWebSocket(){
       const data=JSON.parse(event.data);
       if(data.type==='pong'){
         handlePong(data);
+      }else if(data.type==='clock_set'){
+        const el=document.getElementById('clockWarn');
+        if(data.success){
+          document.getElementById('clockWarnMsg').textContent='Clock set! Recalibrating...';
+          // Reset clock offset estimation with new server time
+          offsetHistory=[];
+          clockOffsetValid=false;
+          clockOffset=0;
+          clockWarnShown=false;
+          sendPing();setTimeout(sendPing,200);setTimeout(sendPing,400);
+          setTimeout(()=>{el.classList.add('hidden');},2000);
+        }else{
+          document.getElementById('clockWarnMsg').textContent='Failed to set clock.';
+          document.getElementById('clockWarnMsg').style.color='var(--bad)';
+        }
       }else if(data.state!==undefined){
         sync(data);
       }
@@ -610,7 +684,7 @@ async function syncInner(msg){
     nowPlaying.classList.remove('hidden');
     trackName.textContent=msg.base+'.fseq';
     if(msg.mp3_url){
-      mediaFileEl.textContent=msg.mp3_url.split('/').pop();
+      mediaFileEl.textContent=decodeURIComponent(msg.mp3_url.split('/').pop());
     }else{
       mediaFileEl.textContent='No audio file found';
     }
@@ -678,7 +752,9 @@ async function syncInner(msg){
   const rawPosMs=Number(msg.pos_ms||0);
 
   let targetMs=rawPosMs;
-  const serverOk=Number.isFinite(serverMs)&&serverMs>1e12&&Math.abs(nowMs-serverMs)<300000;
+  // Use clock offset for serverOk check when available (Pi may have wrong clock — no RTC/NTP)
+  const timeDiff=clockOffsetValid?Math.abs((nowMs+clockOffset)-serverMs):Math.abs(nowMs-serverMs);
+  const serverOk=Number.isFinite(serverMs)&&serverMs>1e12&&timeDiff<300000;
   if(serverOk){
     let elapsed;
     if(clockOffsetValid){
