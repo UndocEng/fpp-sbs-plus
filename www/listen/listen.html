@@ -299,6 +299,13 @@ const RATE_EMA=0.05;
 //   the current rate by at least this much. Prevents unnecessary API calls which
 //   can cause micro-stutters on some devices.
 const MIN_RATE_CHANGE=0.003;
+//
+// JUMP_COLLECT_MS / JUMP_THRESHOLD_MS: Post-settle jump check.
+//   After the 1.5s settle period, collect 1 second of errors at rate 1.0.
+//   If the average error exceeds 200ms, do a hard seek to catch up instantly
+//   instead of waiting 20+ seconds for the PLL to converge from a large offset.
+const JUMP_COLLECT_MS=1000;
+const JUMP_THRESHOLD_MS=200;
 
 // --- PLL State Machine ---
 // phase: 'idle' → 'calibrating' → 'locked'. Resets to 'idle' on track change/stop.
@@ -307,6 +314,9 @@ const MIN_RATE_CHANGE=0.003;
 // anchorLocalMs/anchorFppMs: reference point for measuring rate drift in locked phase
 // lastRateUpdateMs: when we last adjusted playbackRate (for rate interval throttling)
 const pll={phase:'idle',samples:[],baseRate:1.0,anchorLocalMs:0,anchorFppMs:0,lastRateUpdateMs:0};
+
+// --- Post-settle jump check ---
+let jumpCheck={active:false,startMs:0,errors:[]};
 
 // --- Effective Rate Measurement (diagnostic only) ---
 // Tracks actual audio progression vs wall time to show in debug display.
@@ -340,6 +350,7 @@ function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
 // Reset PLL to idle state. Called on track change, stop, pause.
 function pllReset(){
   pll.phase='idle';pll.samples=[];pll.baseRate=1.0;pll.anchorLocalMs=0;pll.anchorFppMs=0;pll.lastRateUpdateMs=0;
+  jumpCheck={active:false,startMs:0,errors:[]};
   if(audio)audio.playbackRate=1.0;
 }
 
@@ -970,6 +981,40 @@ async function syncInner(msg){
     log('PLAY resuming (was paused)');
     playAttempting=true;
     safePlay().finally(()=>{playAttempting=false;});
+  }
+
+  // --- Post-settle jump check ---
+  // After settle, collect 1s of errors at rate 1.0. If avg > 200ms, seek immediately
+  // instead of waiting for PLL to slowly converge from a large offset.
+  if(!jumpCheck.active&&jumpCheck.startMs===0){
+    jumpCheck={active:true,startMs:nowMs,errors:[]};
+    audio.playbackRate=1.0;
+    log('JUMP CHECK: collecting errors for '+JUMP_COLLECT_MS+'ms at rate 1.0');
+  }
+  if(jumpCheck.active){
+    jumpCheck.errors.push(errMs);
+    const elapsed=nowMs-jumpCheck.startMs;
+    errEl.textContent=Math.round(errMs)+' (jump check)';
+    if(elapsed>=JUMP_COLLECT_MS){
+      const avgErr=jumpCheck.errors.reduce((a,b)=>a+b,0)/jumpCheck.errors.length;
+      jumpCheck.active=false;
+      if(Math.abs(avgErr)>JUMP_THRESHOLD_MS){
+        // Seek ahead by play latency to compensate for audio pipeline rebuffer time
+        const leadSec=(playLatencyMs>0?playLatencyMs:500)/1000;
+        const seekTo=clamp(targetSec+leadSec,0,Math.max(0,audio.duration-0.1));
+        log('JUMP CHECK: avg='+Math.round(avgErr)+'ms > '+JUMP_THRESHOLD_MS+'ms — seeking to target+'+Math.round(leadSec*1000)+'ms');
+        sendReport('CORRECTION',avgErr,1.0);
+        audio.currentTime=seekTo;
+        audio.playbackRate=1.0;
+        lastSeekMs=nowMs;
+        lastCorrectionMs=nowMs;
+        errHistoryAll=[];errHistory2s=[];
+        pll.phase='idle';pll.samples=[];
+      }else{
+        log('JUMP CHECK: avg='+Math.round(avgErr)+'ms < '+JUMP_THRESHOLD_MS+'ms — no jump needed');
+      }
+    }
+    return;
   }
 
   // =========================================================================
