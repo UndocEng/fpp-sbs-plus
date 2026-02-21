@@ -323,6 +323,32 @@ async def handle_client(websocket, path=None):
                         "client_ts": data.get("client_ts", 0),
                         "server_ts": int(time.time() * 1000)
                     }))
+                elif msg_type == "set_clock":
+                    # Admin page detected Pi clock is wrong; set from client's time
+                    client_ms = data.get("client_ms", 0)
+                    if client_ms > 1e12:
+                        import subprocess
+                        unix_sec = int(client_ms // 1000)
+                        try:
+                            result = subprocess.run(
+                                ["date", "-s", f"@{unix_sec}"],
+                                check=True, timeout=5,
+                                capture_output=True, text=True
+                            )
+                            logger.info(f"Clock set from client {client_ip}: @{unix_sec}")
+                            await websocket.send(json.dumps({
+                                "type": "clock_set", "success": True
+                            }))
+                        except subprocess.CalledProcessError as e:
+                            logger.error(f"Failed to set clock: {e} stderr={e.stderr}")
+                            await websocket.send(json.dumps({
+                                "type": "clock_set", "success": False
+                            }))
+                        except Exception as e:
+                            logger.error(f"Failed to set clock: {e}")
+                            await websocket.send(json.dumps({
+                                "type": "clock_set", "success": False
+                            }))
                 elif msg_type == "report":
                     # Sync telemetry from client -> write to log file for analysis
                     write_sync_log(client_ip, data)

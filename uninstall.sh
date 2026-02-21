@@ -83,6 +83,14 @@ echo "[uninstall] Removing Apache listener config..."
 sudo a2disconf listener 2>/dev/null || true
 sudo rm -f /etc/apache2/conf-available/listener.conf
 sudo rm -f /etc/apache2/conf-enabled/listener.conf
+
+# Remove the IncludeOptional line injected into FPP's VirtualHost by install.sh
+FPP_VHOST="/etc/apache2/sites-available/000-default.conf"
+if [[ -f "$FPP_VHOST" ]] && grep -q 'show-rewrite.conf' "$FPP_VHOST" 2>/dev/null; then
+  sudo sed -i '/show-rewrite\.conf/d' "$FPP_VHOST"
+  echo "[uninstall] Removed SBS+ rewrite include from FPP VirtualHost"
+fi
+
 sudo systemctl restart apache2 2>/dev/null || true
 echo "[uninstall] Apache listener config removed"
 
