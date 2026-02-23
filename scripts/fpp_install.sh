@@ -211,6 +211,24 @@ if [ -f "$AP_CONF" ]; then
   WLAN_IF="${WLAN_IF:-wlan0}"
 fi
 
+# Safety: detect if WLAN_IF is currently connected to a network (has a routable IP).
+# If so, the AP would steal the management interface and kill SSH. Auto-switch to the
+# other interface if available, or warn and skip AP start.
+WLAN_IF_HAS_IP=$(ip -4 addr show "$WLAN_IF" 2>/dev/null | grep -oP 'inet \K[0-9.]+' || true)
+if [ -n "$WLAN_IF_HAS_IP" ] && [ "$WLAN_IF_HAS_IP" != "192.168.50.1" ] && [ "$WLAN_IF_HAS_IP" != "192.168.60.1" ]; then
+  # WLAN_IF has a non-AP IP — it's connected to another network
+  ALT_IF=$( [ "$WLAN_IF" = "wlan0" ] && echo "wlan1" || echo "wlan0" )
+  if [ -e "/sys/class/net/$ALT_IF" ]; then
+    warn "$WLAN_IF has active IP ($WLAN_IF_HAS_IP) — switching AP to $ALT_IF to avoid losing connectivity"
+    WLAN_IF="$ALT_IF"
+    sudo sed -i "s/^WLAN_IF=.*/WLAN_IF=$ALT_IF/" "$AP_CONF"
+  else
+    warn "$WLAN_IF has active IP ($WLAN_IF_HAS_IP) and no $ALT_IF available"
+    warn "Starting the AP on $WLAN_IF would disconnect your current session!"
+    SKIP_AP_START=1
+  fi
+fi
+
 # Deploy default hostapd config with WPA2 (if not already present)
 HOSTAPD_CONF="$LISTEN_SYNC/hostapd-listener.conf"
 if [ ! -f "$HOSTAPD_CONF" ]; then
@@ -286,7 +304,10 @@ if [ -f "$PLUGIN_DIR/server/listener-ap.service" ]; then
   sudo systemctl daemon-reload
   sudo systemctl enable listener-ap 2>/dev/null || true
 
-  if [ -e "/sys/class/net/$WLAN_IF" ]; then
+  if [ "${SKIP_AP_START:-}" = "1" ]; then
+    warn "listener-ap installed but NOT started (would steal management interface)"
+    info "Connect a USB WiFi adapter or use ethernet, then: sudo systemctl start listener-ap"
+  elif [ -e "/sys/class/net/$WLAN_IF" ]; then
     sudo systemctl restart listener-ap 2>/dev/null || true
     ok "listener-ap service started ($WLAN_IF detected)"
   else
