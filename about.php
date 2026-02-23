@@ -45,6 +45,6 @@ $version = @file_get_contents(dirname(__FILE__) . '/VERSION') ?: 'unknown';
 
 <h4>Credits</h4>
 <p>
-    Developed by <strong>Undoc Engineering</strong>.<br>
+    Developed by <strong>Undocumented Engineer</strong>.<br>
     Built for the <a href="https://falconchristmas.com/" target="_blank" rel="noopener">Falcon Player</a> community.
 </p>
