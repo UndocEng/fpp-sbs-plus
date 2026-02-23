@@ -62,6 +62,17 @@
 
   <button id="enableBtn">Enable Audio</button>
 
+  <div id="btDelayBox" style="margin-top:14px; padding:10px 14px; border:1px solid #333; border-radius:10px; background:#1a1a1a;">
+    <label for="btSlider" style="font-size:14px; color:#aaa;">
+      &#127911; BT Compensation: <span id="btValue">0</span>ms
+    </label>
+    <input type="range" id="btSlider" min="0" max="1000" step="10" value="0"
+      style="width:100%; accent-color:#00e5ff; margin-top:4px;" />
+    <div style="display:flex; justify-content:space-between; font-size:11px; color:#555;">
+      <span>0ms</span><span>1000ms</span>
+    </div>
+  </div>
+
   <div id="idleMsg" class="idle-msg">No show is currently broadcasting.</div>
 
   <div id="nowPlaying" class="now-playing hidden">&#9835; Now Playing: <span id="trackName">-</span></div>
@@ -105,6 +116,8 @@
     <div><b>Last Correction:</b> <span id="lastCorrection">-</span></div>
 
     <div><b>Play Latency:</b> <span id="playLatency">0</span> ms</div>
+
+    <div><b>BT Comp:</b> <span id="btDelay">0</span> ms</div>
 
   </div>
 
@@ -199,7 +212,20 @@ playLatencyEl=document.getElementById('playLatency'),
 rttEl=document.getElementById('rtt'),
 offsetEl=document.getElementById('offset'),
 debugCheck=document.getElementById('debugCheck'),
-debugBox=document.getElementById('debugBox');
+debugBox=document.getElementById('debugBox'),
+btSlider=document.getElementById('btSlider'),
+btValueEl=document.getElementById('btValue'),
+btDelayEl=document.getElementById('btDelay');
+
+// --- BT Compensation ---
+let btOffsetMs=parseInt(localStorage.getItem('fpp-bt-offset'))||0;
+btSlider.value=btOffsetMs;
+btValueEl.textContent=btOffsetMs;
+btSlider.addEventListener('input',function(){
+  btOffsetMs=parseInt(this.value);
+  btValueEl.textContent=btOffsetMs;
+  localStorage.setItem('fpp-bt-offset',btOffsetMs);
+});
 
 // --- Global State ---
 // enabled: user tapped "Enable Audio" (required for mobile autoplay policy)
@@ -857,7 +883,7 @@ async function syncInner(msg){
     // Discard hopelessly stale messages; use real elapsed for accurate targeting
     if(elapsed>2000){return;}
     if(elapsed<0)elapsed=0;
-    targetMs=rawPosMs+elapsed;
+    targetMs=rawPosMs+elapsed+btOffsetMs;
   }else{
     log('SERVER_MS INVALID: '+serverMs+' nowMs='+nowMs+' diff='+Math.abs(nowMs-serverMs));
   }
@@ -883,6 +909,7 @@ async function syncInner(msg){
     lastCorrectionEl.textContent=ago+'s ago';
   }
   playLatencyEl.textContent=Math.round(playLatencyMs);
+  btDelayEl.textContent=btOffsetMs;
 
   // =========================================================================
   // GATE: Wait for clock offset calibration
