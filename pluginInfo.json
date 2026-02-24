@@ -1,17 +1,17 @@
 {
     "repoName": "fpp-eavesdrop",
-    "name": "Eavesdrop - Audio Sync for Listeners",
-    "author": "Undoc Engineering",
+    "name": "SBS with Audio Sync",
+    "author": "Undocumented Engineer",
     "description": "Streams synchronized audio to phones and browsers for Christmas light shows",
-    "homeURL": "https://github.com/UndocEng/fpp-eavesdrop",
-    "srcURL": "https://github.com/UndocEng/fpp-eavesdrop.git",
-    "bugURL": "https://github.com/UndocEng/fpp-eavesdrop/issues",
+    "homeURL": "https://github.com/UndocEng/fpp-eavesdrop-sbs-plus",
+    "srcURL": "https://github.com/UndocEng/fpp-eavesdrop-sbs-plus.git",
+    "bugURL": "https://github.com/UndocEng/fpp-eavesdrop-sbs-plus/issues",
     "allowUpdates": 1,
     "versions": [
         {
             "minFPPVersion": "8.0",
-            "maxFPPVersion": "0",
-            "branch": "main",
+            "maxFPPVersion": "99",
+            "branch": "V4.0",
             "sha": ""
         }
     ]

@@ -19,8 +19,8 @@ function fppeavesdropHeaderIndicator() {
         'visible' => true,
         'icon' => 'fa-headphones',
         'color' => '#D4A030',
-        'tooltip' => 'Eavesdrop Listen Page',
-        'link' => '/listen/admin.html',
+        'tooltip' => 'SBS Audio Sync Dashboard',
+        'link' => 'plugin.php?plugin=fpp-eavesdrop&page=plugin.php',
         'animate' => ''
     ));
 }

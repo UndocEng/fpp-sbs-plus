@@ -1,316 +1,306 @@
 #!/usr/bin/env bash
-# listener-ap.sh
-# Brings up the eavesdrop admin AP (WPA2) and optionally the SBS+ public listener AP (open).
-# Adjust settings via /home/fpp/listen-sync/ap.conf or the web UI.
+# =============================================================================
+# listener-ap.sh — Role-driven AP manager for FPP Eavesdrop
+# =============================================================================
+# Reads roles.json and configures each interface according to its assigned role:
+#   sbs:          WPA2 admin AP (WLED/show devices join, no isolation)
+#   listener:     Isolated public AP (captive portal, nftables firewall, ap_isolate)
+#   show_network: Skip (managed by FPP/wpa_supplicant)
+#   unused:       Skip
+#
+# Adjust settings via the Eavesdrop dashboard or /home/fpp/listen-sync/roles.json
+# =============================================================================
 
 set -uo pipefail
 
-# Source persistent AP config (IP, netmask, show AP settings)
-AP_CONF="/home/fpp/listen-sync/ap.conf"
-[[ -f "$AP_CONF" ]] && source "$AP_CONF"
+LISTEN_SYNC="/home/fpp/listen-sync"
+ROLES_FILE="$LISTEN_SYNC/roles.json"
 
-# Defaults (overridden by ap.conf or environment)
-WLAN_IF="${WLAN_IF:-wlan0}"
-AP_IP="${AP_IP:-192.168.50.1}"
-AP_MASK="${AP_MASK:-24}"
+echo "[listener-ap] Starting role-driven AP manager..."
 
-echo "[listener-ap] Using interface: $WLAN_IF"
-
-# SBS mode (wlan0): stop FPP's hostapd to avoid conflict on the same interface
-if [[ "$WLAN_IF" == "wlan0" ]]; then
-  echo "[listener-ap] SBS mode -- stopping FPP hostapd if running..."
-  sudo systemctl stop hostapd 2>/dev/null || true
-  # Remove FPP tether networkd config if it exists (assigns 192.168.8.1 to wlan0)
-  if [[ -f /etc/systemd/network/10-wlan0.network ]]; then
-    sudo rm -f /etc/systemd/network/10-wlan0.network
-    sudo systemctl restart systemd-networkd 2>/dev/null || true
-    echo "[listener-ap] Removed FPP tether network config"
-  fi
+# --- Read roles.json ---
+if [[ ! -f "$ROLES_FILE" ]]; then
+    echo "[listener-ap] No roles.json found — nothing to configure"
+    exit 0
 fi
-
-sudo ip link set "$WLAN_IF" down || true
-sudo ip addr flush dev "$WLAN_IF" || true
-sudo ip addr add "$AP_IP/$AP_MASK" dev "$WLAN_IF"
-sudo ip link set "$WLAN_IF" up
-
-# Disable power save — AP must stay awake or clients (WLED bulbs, phones) get dropped
-/sbin/iw dev "$WLAN_IF" set power_save off 2>/dev/null || true
-
-# Use persistent hostapd config (SSID/password changeable via web UI)
-HOSTAPD_CONF="/home/fpp/listen-sync/hostapd-listener.conf"
-
-# Create default config if missing
-if [[ ! -f "$HOSTAPD_CONF" ]]; then
-  echo "[listener-ap] Creating default hostapd config"
-  sudo mkdir -p /home/fpp/listen-sync
-  sudo tee "$HOSTAPD_CONF" > /dev/null <<EOF
-interface=$WLAN_IF
-driver=nl80211
-ssid=EAVESDROP
-hw_mode=g
-channel=6
-country_code=US
-wmm_enabled=1
-ieee80211n=1
-auth_algs=1
-ignore_broadcast_ssid=0
-ap_isolate=0
-
-# WPA2 configuration
-wpa=2
-wpa_passphrase=Listen123
-wpa_key_mgmt=WPA-PSK
-wpa_pairwise=CCMP
-rsn_pairwise=CCMP
-EOF
-  sudo chmod 644 "$HOSTAPD_CONF"
-fi
-
-# Compute DHCP range from AP_IP (assumes /24)
-IFS='.' read -r o1 o2 o3 o4 <<< "$AP_IP"
-DHCP_START="${o1}.${o2}.${o3}.10"
-DHCP_END="${o1}.${o2}.${o3}.200"
-
-# dnsmasq config for eavesdrop AP
-DNSMASQ_CONF="/tmp/listener-dnsmasq.conf"
-cat > "$DNSMASQ_CONF" <<EOF
-interface=$WLAN_IF
-except-interface=lo
-bind-interfaces
-dhcp-range=${DHCP_START},${DHCP_END},12h
-dhcp-option=3,$AP_IP
-dhcp-option=6,$AP_IP
-address=/#/$AP_IP
-EOF
-
-echo "[listener-ap] Starting eavesdrop dnsmasq..."
-sudo pkill -f "listener-dnsmasq.conf" || true
-sudo dnsmasq --conf-file="$DNSMASQ_CONF"
-
-echo "[listener-ap] Starting eavesdrop hostapd..."
-sudo pkill -f "hostapd-listener.conf" || true
-sudo hostapd "$HOSTAPD_CONF" -B
-
-# Route replies back to AP clients (fixes overlapping subnet with eth0)
-# Mark connections arriving on AP interface via conntrack, restore mark on replies,
-# then policy-route marked replies out the AP interface instead of eth0.
-echo "[listener-ap] Setting up routing for eavesdrop AP clients..."
-sudo sysctl -w net.ipv4.ip_forward=1 > /dev/null
 
 # Clean up any previous nftables rules from us
 sudo nft delete table inet listener_ap 2>/dev/null || true
+sudo nft delete table inet show_ap 2>/dev/null || true
 
-# Create nftables rules: mark incoming AP packets, restore mark on replies
-sudo nft -f - <<NFT
-table inet listener_ap {
-  chain prerouting {
-    type filter hook prerouting priority mangle; policy accept;
-    iifname "$WLAN_IF" ct mark set 0x64
-  }
-  chain output {
-    type route hook output priority mangle; policy accept;
-    ct mark 0x64 meta mark set 0x64
-  }
-}
-NFT
+# Remove old rewrite rules
+sudo rm -f /home/fpp/listen-sync/show-rewrite.conf 2>/dev/null || true
 
-# Policy route: marked packets use table 100
-sudo ip rule del fwmark 0x64 table 100 2>/dev/null || true
-sudo ip rule add fwmark 0x64 table 100
-sudo ip route replace "${o1}.${o2}.${o3}.0/${AP_MASK}" dev "$WLAN_IF" table 100
+# Track conntrack marks (increment per AP for policy routing)
+MARK_COUNTER=100
 
-# Read actual SSID from config for status message
-CURRENT_SSID=$(grep '^ssid=' "$HOSTAPD_CONF" 2>/dev/null | cut -d= -f2 || echo "EAVESDROP")
-echo "[listener-ap] Eavesdrop AP up (SSID: ${CURRENT_SSID}, IP: ${AP_IP}, WPA2)"
+# Parse roles.json with python3 (available on all FPP systems)
+# Outputs: interface role ssid channel password ip mask (one line per configured interface)
+PARSED=$(python3 -c "
+import json, sys
+try:
+    roles = json.load(open('$ROLES_FILE'))
+    for iface, cfg in roles.items():
+        if isinstance(cfg, str):
+            # Old format — treat as SBS with defaults
+            print(f'{iface} {cfg} EAVESDROP 6 Listen123 192.168.50.1 24')
+        elif isinstance(cfg, dict):
+            role = cfg.get('role', '')
+            ssid = cfg.get('ssid', 'EAVESDROP')
+            ch = cfg.get('channel', 6)
+            pw = cfg.get('password', '')
+            ip = cfg.get('ip', '192.168.50.1')
+            mask = cfg.get('mask', 24)
+            print(f'{iface} {role} {ssid} {ch} {pw} {ip} {mask}')
+except Exception as e:
+    print(f'ERROR {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1)
 
-# ======================================================================
-# SBS+ Show AP (public listener on opposite interface)
-# ======================================================================
-SHOW_AP_ENABLED="${SHOW_AP_ENABLED:-0}"
-
-if [[ "$SHOW_AP_ENABLED" != "1" ]]; then
-  echo "[listener-ap] Show AP disabled (SHOW_AP_ENABLED=0)"
-  # Remove rewrite rules and .htaccess if left over from a previous run
-  sudo rm -f /home/fpp/listen-sync/show-rewrite.conf 2>/dev/null || true
-  sudo rm -f /opt/fpp/www/.htaccess 2>/dev/null || true
-  sudo systemctl reload apache2 2>/dev/null || true
-  exit 0
+if [[ $? -ne 0 ]]; then
+    echo "[listener-ap] ERROR: Failed to parse roles.json: $PARSED"
+    exit 1
 fi
 
-# Derive show interface (opposite of eavesdrop)
-if [[ "$WLAN_IF" == "wlan0" ]]; then
-  SHOW_IF="wlan1"
-else
-  SHOW_IF="wlan0"
+if [[ -z "$PARSED" ]]; then
+    echo "[listener-ap] No interfaces configured in roles.json"
+    exit 0
 fi
 
-SHOW_AP_IP="${SHOW_AP_IP:-192.168.60.1}"
-SHOW_AP_MASK="${SHOW_AP_MASK:-24}"
-SHOW_AP_SSID="${SHOW_AP_SSID:-SHOW_AUDIO}"
+# Track which interfaces have listener role (for rewrite rule generation)
+LISTENER_INTERFACES=()
 
-echo "[listener-ap] SBS+ mode: starting show AP on $SHOW_IF"
+# --- Process each interface ---
+while IFS=' ' read -r IFACE ROLE SSID CHANNEL PASSWORD IP MASK; do
+    [[ -z "$IFACE" || "$IFACE" == "ERROR" ]] && continue
 
-# Check if show interface exists
-if [[ ! -e "/sys/class/net/$SHOW_IF" ]]; then
-  echo "[listener-ap] WARNING: $SHOW_IF not found -- show AP not started"
-  echo "[listener-ap] Plug in a USB WiFi adapter for SBS+ mode"
-  exit 0
-fi
+    echo ""
+    echo "[listener-ap] === $IFACE: role=$ROLE ==="
 
-# --- Show AP setup in a subshell so failures don't kill eavesdrop ---
-(
-  set -e
+    # Skip non-AP roles
+    if [[ "$ROLE" != "sbs" && "$ROLE" != "listener" ]]; then
+        echo "[listener-ap] Skipping $IFACE (role: $ROLE)"
+        continue
+    fi
 
-  # Configure show interface IP
-  sudo ip link set "$SHOW_IF" down || true
-  sudo ip addr flush dev "$SHOW_IF" || true
-  sudo ip addr add "$SHOW_AP_IP/$SHOW_AP_MASK" dev "$SHOW_IF"
-  sudo ip link set "$SHOW_IF" up
+    # Check if interface exists
+    if [[ ! -e "/sys/class/net/$IFACE" ]]; then
+        echo "[listener-ap] WARNING: $IFACE not found — skipping"
+        continue
+    fi
 
-  # Use persistent show hostapd config
-  SHOW_HOSTAPD="/home/fpp/listen-sync/hostapd-show.conf"
+    # SBS on wlan0: stop FPP's hostapd to avoid conflict
+    if [[ "$ROLE" == "sbs" && "$IFACE" == "wlan0" ]]; then
+        echo "[listener-ap] SBS mode on wlan0 — stopping FPP hostapd..."
+        sudo systemctl stop hostapd 2>/dev/null || true
+        if [[ -f /etc/systemd/network/10-wlan0.network ]]; then
+            sudo rm -f /etc/systemd/network/10-wlan0.network
+            sudo systemctl restart systemd-networkd 2>/dev/null || true
+            echo "[listener-ap] Removed FPP tether network config"
+        fi
+    fi
 
-  # Create default config if missing
-  if [[ ! -f "$SHOW_HOSTAPD" ]]; then
-    echo "[listener-ap] Creating default show AP hostapd config"
-    sudo tee "$SHOW_HOSTAPD" > /dev/null <<CONFEOF
-interface=$SHOW_IF
+    # Configure interface IP
+    sudo ip link set "$IFACE" down 2>/dev/null || true
+    sudo ip addr flush dev "$IFACE" 2>/dev/null || true
+    sudo ip addr add "$IP/$MASK" dev "$IFACE"
+    sudo ip link set "$IFACE" up
+    /sbin/iw dev "$IFACE" set power_save off 2>/dev/null || true
+
+    # --- Hostapd config ---
+    HOSTAPD_FILE="$LISTEN_SYNC/hostapd-${IFACE}.conf"
+
+    if [[ ! -f "$HOSTAPD_FILE" ]]; then
+        echo "[listener-ap] Creating hostapd config for $IFACE"
+        AP_ISOLATE=0
+        WPA_BLOCK="wpa=2\nwpa_passphrase=Listen123\nwpa_key_mgmt=WPA-PSK\nwpa_pairwise=CCMP\nrsn_pairwise=CCMP"
+
+        if [[ "$ROLE" == "listener" ]]; then
+            AP_ISOLATE=1
+            if [[ -z "$PASSWORD" ]]; then
+                WPA_BLOCK="wpa=0"
+            fi
+        fi
+
+        sudo tee "$HOSTAPD_FILE" > /dev/null <<HOSTAPD_EOF
+interface=$IFACE
 driver=nl80211
-ssid=$SHOW_AP_SSID
+ssid=$SSID
 hw_mode=g
-channel=11
+channel=$CHANNEL
 country_code=US
 wmm_enabled=1
 ieee80211n=1
 auth_algs=1
+$(echo -e "$WPA_BLOCK")
 ignore_broadcast_ssid=0
-wpa=0
-ap_isolate=1
-CONFEOF
-    sudo chmod 644 "$SHOW_HOSTAPD"
-  else
-    # Ensure interface line matches the derived show interface
-    sudo sed -i "s/^interface=.*/interface=$SHOW_IF/" "$SHOW_HOSTAPD"
-  fi
+ap_isolate=$AP_ISOLATE
+HOSTAPD_EOF
+        sudo chmod 644 "$HOSTAPD_FILE"
+    else
+        # Ensure interface line matches
+        sudo sed -i "s/^interface=.*/interface=$IFACE/" "$HOSTAPD_FILE"
+    fi
 
-  # Start show AP hostapd
-  echo "[listener-ap] Starting show AP hostapd..."
-  sudo pkill -f "hostapd-show.conf" || true
-  sudo hostapd "$SHOW_HOSTAPD" -B
+    # --- dnsmasq config ---
+    IFS='.' read -r o1 o2 o3 o4 <<< "$IP"
+    SUBNET="${o1}.${o2}.${o3}"
+    DHCP_START="${SUBNET}.10"
+    DHCP_END="${SUBNET}.200"
 
-  # dnsmasq for show AP (separate instance, separate interface)
-  IFS='.' read -r s1 s2 s3 s4 <<< "$SHOW_AP_IP"
-  SHOW_DHCP_START="${s1}.${s2}.${s3}.10"
-  SHOW_DHCP_END="${s1}.${s2}.${s3}.200"
+    DNSMASQ_FILE="/tmp/dnsmasq-${IFACE}.conf"
 
-  SHOW_DNSMASQ_CONF="/tmp/show-dnsmasq.conf"
-  cat > "$SHOW_DNSMASQ_CONF" <<DNSEOF
-interface=$SHOW_IF
+    if [[ "$ROLE" == "listener" ]]; then
+        # Listener: captive portal with wildcard DNS and CAPPORT
+        cat > "$DNSMASQ_FILE" <<DNSEOF
+interface=$IFACE
 except-interface=lo
 bind-interfaces
-dhcp-range=${SHOW_DHCP_START},${SHOW_DHCP_END},12h
-dhcp-option=3,$SHOW_AP_IP
-dhcp-option=6,$SHOW_AP_IP
-dhcp-option=114,http://$SHOW_AP_IP/listen/portal-api.php
-address=/#/$SHOW_AP_IP
+dhcp-range=${DHCP_START},${DHCP_END},12h
+dhcp-option=3,$IP
+dhcp-option=6,$IP
+dhcp-option=114,http://$IP/listen/portal-api.php
+address=/#/$IP
 DNSEOF
+    else
+        # SBS: standard DHCP + DNS, no wildcard redirect, no captive portal
+        cat > "$DNSMASQ_FILE" <<DNSEOF
+interface=$IFACE
+except-interface=lo
+bind-interfaces
+dhcp-range=${DHCP_START},${DHCP_END},12h
+dhcp-option=3,$IP
+dhcp-option=6,$IP
+DNSEOF
+    fi
 
-  echo "[listener-ap] Starting show AP dnsmasq..."
-  sudo pkill -f "show-dnsmasq.conf" || true
-  sudo dnsmasq --conf-file="$SHOW_DNSMASQ_CONF"
+    # Start dnsmasq for this interface
+    echo "[listener-ap] Starting dnsmasq for $IFACE..."
+    sudo pkill -f "dnsmasq-${IFACE}.conf" 2>/dev/null || true
+    sudo dnsmasq --conf-file="$DNSMASQ_FILE"
 
-  # Generate Apache rewrite rules for captive portal + security whitelist.
-  # Written directly to an Apache conf snippet (IncludeOptional'd by listener.conf)
-  # because FPP's 000-default.conf sets AllowOverride None, blocking .htaccess.
-  SHOW_REWRITE="/home/fpp/listen-sync/show-rewrite.conf"
-  SHOW_SUBNET_ESC="${s1}\\.${s2}\\.${s3}\\."
-  echo "[listener-ap] Generating captive portal rewrite rules..."
-  sudo tee "$SHOW_REWRITE" > /dev/null <<RWEOF
-# Auto-generated by listener-ap.sh — DO NOT EDIT
-# Captive portal + security whitelist for SBS+ show AP ($SHOW_AP_IP)
-# Removed when show AP stops. IncludeOptional'd by listener.conf.
-RewriteEngine On
+    # Start hostapd for this interface
+    echo "[listener-ap] Starting hostapd for $IFACE..."
+    sudo pkill -f "hostapd-${IFACE}.conf" 2>/dev/null || true
+    sudo hostapd "$HOSTAPD_FILE" -B
 
-# Captive portal detection: redirect known URLs from show subnet
-RewriteCond %{REMOTE_ADDR} ^${SHOW_SUBNET_ESC}
-RewriteCond %{REQUEST_URI} ^/(generate_204|gen_204|hotspot-detect\\.html|success\\.html|success\\.txt|connecttest\\.txt|canonical\\.html|ncsi\\.txt|redirect)\$ [NC,OR]
-RewriteCond %{HTTP_HOST} ^(captive\\.apple\\.com|connectivitycheck\\.gstatic\\.com|connectivitycheck\\.android\\.com|clients[0-9]\\.google\\.com|www\\.msftconnecttest\\.com|msftconnecttest\\.com|msftncsi\\.com)\$ [NC]
-RewriteRule ^ http://${SHOW_AP_IP}/listen/listen.html [R=302,L]
+    # --- Conntrack routing (policy route replies back to correct AP) ---
+    MARK_HEX=$(printf '0x%02X' $MARK_COUNTER)
+    TABLE_NUM=$MARK_COUNTER
 
-# Whitelist: allow public listen files from show subnet
-RewriteCond %{REMOTE_ADDR} ^${SHOW_SUBNET_ESC}
-RewriteCond %{REQUEST_URI} ^/listen/(listen\\.html|status\\.php|version\\.php|portal-api\\.php|detect\\.php|logo[^/]*\\.png)\$ [NC]
-RewriteRule ^ - [L]
+    echo "[listener-ap] Setting up routing for $IFACE (mark=$MARK_HEX, table=$TABLE_NUM)..."
+    sudo sysctl -w net.ipv4.ip_forward=1 > /dev/null
 
-# Whitelist: allow /music/ (audio files)
-RewriteCond %{REMOTE_ADDR} ^${SHOW_SUBNET_ESC}
-RewriteCond %{REQUEST_URI} ^/music(/|\$) [NC]
-RewriteRule ^ - [L]
-
-# Whitelist: allow /ws (WebSocket proxy)
-RewriteCond %{REMOTE_ADDR} ^${SHOW_SUBNET_ESC}
-RewriteCond %{REQUEST_URI} ^/ws\$ [NC]
-RewriteRule ^ - [L]
-
-# Whitelist: allow favicon.ico
-RewriteCond %{REMOTE_ADDR} ^${SHOW_SUBNET_ESC}
-RewriteCond %{REQUEST_URI} ^/favicon\\.ico\$ [NC]
-RewriteRule ^ - [L]
-
-# Block everything else from show subnet (admin pages, FPP UI, /api/, etc.)
-RewriteCond %{REMOTE_ADDR} ^${SHOW_SUBNET_ESC}
-RewriteRule ^ http://${SHOW_AP_IP}/listen/listen.html [R=302,L]
-RWEOF
-  sudo systemctl reload apache2 2>/dev/null || true
-  echo "[listener-ap] Captive portal rewrite rules deployed"
-
-  # nftables security firewall for show AP
-  # Phones on the show AP can ONLY reach: DHCP, DNS, HTTP, WebSocket on the Pi
-  # Everything else is REJECTed (fast fail for captive portal detection)
-  echo "[listener-ap] Setting up show AP firewall..."
-  sudo nft delete table inet show_ap 2>/dev/null || true
-
-  sudo nft -f - <<NFT
-table inet show_ap {
-  # Conntrack routing (same pattern as eavesdrop, different mark)
+    # Conntrack mark for this AP's clients
+    sudo nft add table inet "listener_${IFACE}" 2>/dev/null || true
+    sudo nft flush table inet "listener_${IFACE}" 2>/dev/null || true
+    sudo nft -f - <<NFT
+table inet listener_${IFACE} {
   chain prerouting {
     type filter hook prerouting priority mangle; policy accept;
-    iifname "$SHOW_IF" ct mark set 0xC8
+    iifname "$IFACE" ct mark set $MARK_HEX
   }
   chain output {
     type route hook output priority mangle; policy accept;
-    ct mark 0xC8 meta mark set 0xC8
-  }
-  # Security firewall: restrict show AP to listener services only
-  chain show_input {
-    type filter hook input priority 0; policy accept;
-    iifname != "$SHOW_IF" accept
-    udp dport { 67, 68 } accept
-    ip daddr $SHOW_AP_IP udp dport 53 accept
-    ip daddr $SHOW_AP_IP tcp dport 53 accept
-    ip daddr $SHOW_AP_IP tcp dport { 80, 8080 } accept
-    meta l4proto tcp reject with tcp reset
-    reject
-  }
-  # Block show AP clients from reaching other networks (wlan0, eth0, etc.)
-  chain show_forward {
-    type filter hook forward priority 0; policy accept;
-    iifname "$SHOW_IF" drop
+    ct mark $MARK_HEX meta mark set $MARK_HEX
   }
 }
 NFT
 
-  # Policy route for show AP (separate table)
-  sudo ip rule del fwmark 0xC8 table 200 2>/dev/null || true
-  sudo ip rule add fwmark 0xC8 table 200
-  sudo ip route replace "${s1}.${s2}.${s3}.0/${SHOW_AP_MASK}" dev "$SHOW_IF" table 200
+    # Policy route
+    sudo ip rule del fwmark $MARK_HEX table $TABLE_NUM 2>/dev/null || true
+    sudo ip rule add fwmark $MARK_HEX table $TABLE_NUM
+    sudo ip route replace "${SUBNET}.0/${MASK}" dev "$IFACE" table $TABLE_NUM
 
-  SHOW_SSID=$(grep '^ssid=' "$SHOW_HOSTAPD" 2>/dev/null | cut -d= -f2 || echo "$SHOW_AP_SSID")
-  echo "[listener-ap] Show AP up (SSID: ${SHOW_SSID}, IP: ${SHOW_AP_IP}, open, firewalled)"
-  echo "[listener-ap] SBS+ mode active: eavesdrop on $WLAN_IF + public listener on $SHOW_IF"
-)
+    # --- Listener-specific: nftables firewall + captive portal ---
+    if [[ "$ROLE" == "listener" ]]; then
+        echo "[listener-ap] Setting up listener firewall for $IFACE..."
 
-if [[ $? -ne 0 ]]; then
-  echo "[listener-ap] ERROR: Show AP setup failed -- eavesdrop AP is still running"
-  echo "[listener-ap] Check 'journalctl -u listener-ap' for details"
+        sudo nft -f - <<NFT
+table inet listener_${IFACE} {
+  chain ${IFACE}_input {
+    type filter hook input priority 0; policy accept;
+    iifname != "$IFACE" accept
+    udp dport { 67, 68 } accept
+    ip daddr $IP udp dport 53 accept
+    ip daddr $IP tcp dport 53 accept
+    ip daddr $IP tcp dport { 80, 8080 } accept
+    meta l4proto tcp reject with tcp reset
+    reject
+  }
+  chain ${IFACE}_forward {
+    type filter hook forward priority 0; policy accept;
+    iifname "$IFACE" drop
+  }
+}
+NFT
+
+        # Track for Apache rewrite generation
+        LISTENER_INTERFACES+=("$IFACE:$IP:$SUBNET")
+
+        CURRENT_SSID=$(grep '^ssid=' "$HOSTAPD_FILE" 2>/dev/null | cut -d= -f2 || echo "$SSID")
+        echo "[listener-ap] Listener AP up on $IFACE (SSID: ${CURRENT_SSID}, IP: $IP, firewalled)"
+    else
+        CURRENT_SSID=$(grep '^ssid=' "$HOSTAPD_FILE" 2>/dev/null | cut -d= -f2 || echo "$SSID")
+        echo "[listener-ap] SBS AP up on $IFACE (SSID: ${CURRENT_SSID}, IP: $IP, WPA2)"
+    fi
+
+    MARK_COUNTER=$((MARK_COUNTER + 1))
+
+done <<< "$PARSED"
+
+# --- Generate Apache rewrite rules for all listener APs ---
+if [[ ${#LISTENER_INTERFACES[@]} -gt 0 ]]; then
+    SHOW_REWRITE="/home/fpp/listen-sync/show-rewrite.conf"
+    echo "[listener-ap] Generating captive portal rewrite rules for ${#LISTENER_INTERFACES[@]} listener AP(s)..."
+
+    {
+        echo "# Auto-generated by listener-ap.sh — DO NOT EDIT"
+        echo "# Captive portal + security whitelist for listener APs"
+        echo "RewriteEngine On"
+        echo ""
+
+        for ENTRY in "${LISTENER_INTERFACES[@]}"; do
+            IFS=':' read -r L_IFACE L_IP L_SUBNET <<< "$ENTRY"
+            L_SUBNET_ESC="${L_SUBNET//./\\.}\\."
+
+            cat <<RWEOF
+
+# --- Listener AP: $L_IFACE ($L_IP) ---
+RewriteCond %{REMOTE_ADDR} ^${L_SUBNET_ESC}
+RewriteCond %{REQUEST_URI} ^/(generate_204|gen_204|hotspot-detect\\.html|success\\.html|success\\.txt|connecttest\\.txt|canonical\\.html|ncsi\\.txt|redirect)\$ [NC,OR]
+RewriteCond %{HTTP_HOST} ^(captive\\.apple\\.com|connectivitycheck\\.gstatic\\.com|connectivitycheck\\.android\\.com|clients[0-9]\\.google\\.com|www\\.msftconnecttest\\.com|msftconnecttest\\.com|msftncsi\\.com)\$ [NC]
+RewriteRule ^ http://${L_IP}/listen/listen.html [R=302,L]
+
+RewriteCond %{REMOTE_ADDR} ^${L_SUBNET_ESC}
+RewriteCond %{REQUEST_URI} ^/listen/(listen\\.html|status\\.php|version\\.php|portal-api\\.php|detect\\.php|logo[^/]*\\.png)\$ [NC]
+RewriteRule ^ - [L]
+
+RewriteCond %{REMOTE_ADDR} ^${L_SUBNET_ESC}
+RewriteCond %{REQUEST_URI} ^/music(/|\$) [NC]
+RewriteRule ^ - [L]
+
+RewriteCond %{REMOTE_ADDR} ^${L_SUBNET_ESC}
+RewriteCond %{REQUEST_URI} ^/ws\$ [NC]
+RewriteRule ^ - [L]
+
+RewriteCond %{REMOTE_ADDR} ^${L_SUBNET_ESC}
+RewriteCond %{REQUEST_URI} ^/favicon\\.ico\$ [NC]
+RewriteRule ^ - [L]
+
+RewriteCond %{REMOTE_ADDR} ^${L_SUBNET_ESC}
+RewriteRule ^ http://${L_IP}/listen/listen.html [R=302,L]
+RWEOF
+        done
+    } | sudo tee "$SHOW_REWRITE" > /dev/null
+
+    sudo systemctl reload apache2 2>/dev/null || true
+    echo "[listener-ap] Captive portal rewrite rules deployed"
+else
+    # No listener APs — clean up rewrite rules
+    sudo rm -f /home/fpp/listen-sync/show-rewrite.conf 2>/dev/null || true
+    sudo systemctl reload apache2 2>/dev/null || true
 fi
+
+echo ""
+echo "[listener-ap] All configured APs started."

@@ -1,0 +1,117 @@
+/* =============================================================================
+ * dashboard.css — Eavesdrop Network Dashboard
+ * =============================================================================
+ * Minimal overrides for the card-based network config page.
+ * FPP's Bootstrap 5 dark theme handles most styling.
+ * ============================================================================= */
+
+/* Interface card grid — don't stretch shorter cards to match taller neighbors */
+#interface-cards {
+    align-items: flex-start;
+}
+
+/* Interface cards */
+.iface-card {
+    border-color: #444;
+}
+.iface-card .card-header {
+    background: rgba(255, 255, 255, 0.05);
+    border-bottom-color: #444;
+}
+
+/* MAC address code styling */
+code {
+    font-size: 0.85em;
+    color: #adb5bd;
+}
+
+/* Compact form rows inside cards */
+.iface-card .row.mb-2 {
+    margin-bottom: 0.4rem !important;
+}
+.iface-card .col-form-label {
+    font-size: 0.875rem;
+    padding-top: 0.3rem;
+    padding-bottom: 0.3rem;
+}
+.iface-card .form-control-sm,
+.iface-card .form-select-sm {
+    font-size: 0.875rem;
+}
+
+/* Log output area */
+.log-output {
+    max-height: 400px;
+    overflow-y: auto;
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 0.5rem;
+}
+
+/* Self-test results table */
+#selftest-results .table td {
+    padding: 0.25rem 0.5rem;
+    vertical-align: middle;
+}
+
+/* Scan results list */
+.list-group-item-action {
+    background: transparent;
+    color: #e0e0e0;
+    border-color: #444;
+}
+.list-group-item-action:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+/* Collapsible section headers */
+.card-header[data-bs-toggle="collapse"] {
+    cursor: pointer;
+}
+.card-header[data-bs-toggle="collapse"]:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* Quick links button spacing */
+.btn-sm {
+    margin-bottom: 2px;
+}
+
+/* Fix alert contrast in FPP's dark theme — force dark text on light backgrounds */
+.iface-card .alert-info {
+    background: #1b4d5c;
+    border-color: #2a6a7a;
+    color: #c8e6ef;
+}
+.iface-card .alert-warning {
+    background: #5c4b1b;
+    border-color: #7a6a2a;
+    color: #f0e0b0;
+}
+.iface-card .alert-info strong,
+.iface-card .alert-warning strong {
+    color: #fff;
+}
+
+/* Connected clients table inside AP cards */
+.iface-card .client-table {
+    font-size: 0.8em;
+    margin: 0;
+}
+.iface-card .client-table td {
+    padding: 0.2rem 0.4rem;
+    border-color: #444;
+}
+.iface-card .client-table th {
+    padding: 0.2rem 0.4rem;
+    border-color: #555;
+    font-weight: 600;
+    font-size: 0.85em;
+}
