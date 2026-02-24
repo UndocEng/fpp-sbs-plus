@@ -35,7 +35,8 @@ sudo rm -f /home/fpp/listen-sync/show-rewrite.conf 2>/dev/null || true
 MARK_COUNTER=100
 
 # Parse roles.json with python3 (available on all FPP systems)
-# Outputs: interface role ssid channel password ip mask (one line per configured interface)
+# Outputs pipe-delimited: interface|role|ssid|channel|password|ip|mask
+# Pipe delimiter prevents empty password from collapsing fields
 PARSED=$(python3 -c "
 import json, sys
 try:
@@ -43,7 +44,7 @@ try:
     for iface, cfg in roles.items():
         if isinstance(cfg, str):
             # Old format — treat as SBS with defaults
-            print(f'{iface} {cfg} EAVESDROP 6 Listen123 192.168.50.1 24')
+            print(f'{iface}|{cfg}|EAVESDROP|6|Listen123|192.168.50.1|24')
         elif isinstance(cfg, dict):
             role = cfg.get('role', '')
             ssid = cfg.get('ssid', 'EAVESDROP')
@@ -51,7 +52,7 @@ try:
             pw = cfg.get('password', '')
             ip = cfg.get('ip', '192.168.50.1')
             mask = cfg.get('mask', 24)
-            print(f'{iface} {role} {ssid} {ch} {pw} {ip} {mask}')
+            print(f'{iface}|{role}|{ssid}|{ch}|{pw}|{ip}|{mask}')
 except Exception as e:
     print(f'ERROR {e}', file=sys.stderr)
     sys.exit(1)
@@ -71,7 +72,7 @@ fi
 LISTENER_INTERFACES=()
 
 # --- Process each interface ---
-while IFS=' ' read -r IFACE ROLE SSID CHANNEL PASSWORD IP MASK; do
+while IFS='|' read -r IFACE ROLE SSID CHANNEL PASSWORD IP MASK; do
     [[ -z "$IFACE" || "$IFACE" == "ERROR" ]] && continue
 
     echo ""
@@ -149,6 +150,7 @@ HOSTAPD_EOF
     DHCP_END="${SUBNET}.200"
 
     DNSMASQ_FILE="/tmp/dnsmasq-${IFACE}.conf"
+    LEASE_FILE="/var/lib/misc/dnsmasq-${IFACE}.leases"
 
     if [[ "$ROLE" == "listener" ]]; then
         # Listener: captive portal with wildcard DNS and CAPPORT
@@ -156,6 +158,7 @@ HOSTAPD_EOF
 interface=$IFACE
 except-interface=lo
 bind-interfaces
+dhcp-leasefile=$LEASE_FILE
 dhcp-range=${DHCP_START},${DHCP_END},12h
 dhcp-option=3,$IP
 dhcp-option=6,$IP
@@ -168,6 +171,7 @@ DNSEOF
 interface=$IFACE
 except-interface=lo
 bind-interfaces
+dhcp-leasefile=$LEASE_FILE
 dhcp-range=${DHCP_START},${DHCP_END},12h
 dhcp-option=3,$IP
 dhcp-option=6,$IP
