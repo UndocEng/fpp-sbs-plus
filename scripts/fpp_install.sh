@@ -125,20 +125,33 @@ if [ -f "$PLUGIN_DIR/config/apache-listener.conf" ]; then
   sudo a2enconf listener 2>/dev/null || true
 fi
 
-# Enable AllowOverride for captive portal .htaccess
-APACHE_CONF="/etc/apache2/sites-enabled/000-default.conf"
-if [ -f "$APACHE_CONF" ]; then
-  if ! [ -f "$APACHE_CONF.listener-backup" ]; then
-    sudo cp "$APACHE_CONF" "$APACHE_CONF.listener-backup" 2>/dev/null || true
-  fi
-  sudo sed -i '/<Directory \/opt\/fpp\/www\/>/,/<\/Directory>/ s/AllowOverride None/AllowOverride All/' "$APACHE_CONF" 2>/dev/null || true
+# Clean up any previous 000-default.conf modifications (FPP regenerates this file,
+# so we no longer inject IncludeOptional or AllowOverride changes there).
+# Rewrite rules now live in conf-enabled/listener.conf which FPP doesn't touch.
+FPP_VHOST="/etc/apache2/sites-available/000-default.conf"
+if [ -f "$FPP_VHOST" ] && grep -q 'show-rewrite.conf' "$FPP_VHOST" 2>/dev/null; then
+  sudo sed -i '/show-rewrite\.conf/d' "$FPP_VHOST"
+  info "Removed old VirtualHost injection (now in conf-enabled)"
+fi
+# Restore AllowOverride backup if it exists (no longer needed)
+if [ -f "/etc/apache2/sites-enabled/000-default.conf.listener-backup" ]; then
+  sudo mv "/etc/apache2/sites-enabled/000-default.conf.listener-backup" \
+          "/etc/apache2/sites-enabled/000-default.conf" 2>/dev/null || true
 fi
 
-# Inject SBS+ rewrite rules into FPP's VirtualHost
-FPP_VHOST="/etc/apache2/sites-available/000-default.conf"
-if [ -f "$FPP_VHOST" ] && ! grep -q 'show-rewrite.conf' "$FPP_VHOST" 2>/dev/null; then
-  sudo sed -i '/<VirtualHost \*:80>/a \\tIncludeOptional /home/fpp/listen-sync/show-rewrite.conf' "$FPP_VHOST"
-  info "SBS+ rewrite rules injected into FPP VirtualHost"
+# Clean up old fpp-listener-sync dnsmasq config if present
+# The old plugin wrote directly to /etc/dnsmasq.conf with listen-address=192.168.50.1
+# which conflicts with our per-interface dnsmasq instances.
+if grep -q 'SHOW_AUDIO\|listen-sync\|listener' /etc/dnsmasq.conf 2>/dev/null; then
+  info "Cleaning old fpp-listener-sync dnsmasq config..."
+  sudo systemctl stop dnsmasq 2>/dev/null || true
+  sudo systemctl disable dnsmasq 2>/dev/null || true
+  # Reset to minimal default (dnsmasq service stays disabled — we use per-interface instances)
+  sudo tee /etc/dnsmasq.conf > /dev/null <<'DNSEOF'
+# Default dnsmasq.conf — system dnsmasq disabled.
+# Per-interface DNS/DHCP is managed by SBS with Audio Sync plugin.
+DNSEOF
+  ok "Old dnsmasq config cleaned"
 fi
 
 # Disable SSL (self-signed cert breaks captive portal)
