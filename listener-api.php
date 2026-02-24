@@ -98,11 +98,13 @@ function getStatus() {
     $ssid = getHostapdValue('ssid');
     $channel = getHostapdValue('channel');
 
-    // Count connected clients from DHCP leases
+    // Count connected clients from all per-interface lease files
     $clientCount = 0;
-    $leases = @file('/var/lib/misc/dnsmasq.leases');
-    if ($leases) {
-        $clientCount = count(array_filter($leases, 'strlen'));
+    $leaseFiles = glob('/var/lib/misc/dnsmasq-wlan*.leases');
+    if (!$leaseFiles) $leaseFiles = ['/var/lib/misc/dnsmasq.leases'];
+    foreach ($leaseFiles as $lf) {
+        $leases = @file($lf);
+        if ($leases) $clientCount += count(array_filter($leases, 'strlen'));
     }
 
     // FPP tether state
@@ -812,8 +814,12 @@ function getClientsForInterface($iface) {
         return [];
     }
 
-    // Read DHCP leases
-    $leases = @file("/var/lib/misc/dnsmasq.leases", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    // Read DHCP leases — per-interface file first, fallback to default
+    $leaseFile = "/var/lib/misc/dnsmasq-{$iface}.leases";
+    if (!file_exists($leaseFile)) {
+        $leaseFile = "/var/lib/misc/dnsmasq.leases";
+    }
+    $leases = @file($leaseFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     $leaseMap = [];
     if ($leases !== false) {
         foreach ($leases as $line) {
