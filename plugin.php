@@ -25,12 +25,12 @@ $pluginName = 'fpp-eavesdrop';
 
 <!-- Page Header -->
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1><i class="fas fa-network-wired"></i> Network Configuration
+    <h1><i class="fas fa-network-wired"></i> SBS Audio Sync
         <img src="/listen/logo.png" alt="" style="height:36px; vertical-align:middle; margin-left:12px;">
         <small class="text-muted" style="font-size:0.4em; vertical-align:middle; margin-left:4px;">v<?= $vEnc ?></small>
     </h1>
     <div>
-        <button id="btn-help" class="btn btn-outline-info btn-sm me-1" title="About Eavesdrop">
+        <button id="btn-help" class="btn btn-outline-info btn-sm me-1" title="About SBS Audio Sync">
             <i class="fas fa-question-circle"></i> Help
         </button>
         <a href="/networkconfig-original.php" class="btn btn-outline-secondary btn-sm"
@@ -154,7 +154,7 @@ $pluginName = 'fpp-eavesdrop';
         <div class="modal-content bg-dark text-light">
             <div class="modal-header border-secondary">
                 <h5 class="modal-title" id="helpModalLabel">
-                    <i class="fas fa-question-circle"></i> Eavesdrop — Help
+                    <i class="fas fa-question-circle"></i> SBS Audio Sync — Help
                 </h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>

@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# fpp_uninstall.sh — FPP Eavesdrop SBS+ Plugin Uninstall Script
+# fpp_uninstall.sh — SBS with Audio Sync Plugin Uninstall Script
 # =============================================================================
 # Called by FPP's plugin manager before removing the plugin, or manually via:
 #   sudo ./scripts/fpp_uninstall.sh
@@ -24,7 +24,7 @@ WEBROOT="/opt/fpp/www"
 LISTEN_SYNC="/home/fpp/listen-sync"
 
 echo ""
-info "Uninstalling FPP Eavesdrop SBS+ v${VERSION}..."
+info "Uninstalling SBS with Audio Sync v${VERSION}..."
 
 # --- Stop and remove systemd services ---
 info "Stopping services..."
@@ -37,20 +37,14 @@ sudo systemctl stop listener-ap 2>/dev/null || true
 sudo systemctl disable listener-ap 2>/dev/null || true
 sudo rm -f /etc/systemd/system/listener-ap.service
 
-# Kill any leftover processes started by listener-ap.sh
-if pgrep -f "hostapd-listener.conf" >/dev/null 2>&1; then
-  sudo pkill -f "hostapd-listener.conf" || true
-fi
-if pgrep -f "hostapd-show.conf" >/dev/null 2>&1; then
-  sudo pkill -f "hostapd-show.conf" || true
-fi
-if pgrep -f "listener-dnsmasq.conf" >/dev/null 2>&1; then
-  sudo pkill -f "listener-dnsmasq.conf" || true
-fi
-if pgrep -f "show-dnsmasq.conf" >/dev/null 2>&1; then
-  sudo pkill -f "show-dnsmasq.conf" || true
-fi
-sudo rm -f /tmp/listener-dnsmasq.conf /tmp/show-dnsmasq.conf
+# Kill any leftover hostapd/dnsmasq processes started by listener-ap.sh
+# Covers both old format (hostapd-listener.conf, hostapd-show.conf) and
+# new per-interface format (hostapd-wlan0.conf, dnsmasq-wlan1.conf, etc.)
+sudo pkill -f "hostapd.*listen-sync" 2>/dev/null || true
+sudo pkill -f "dnsmasq-wlan" 2>/dev/null || true
+sudo pkill -f "listener-dnsmasq.conf" 2>/dev/null || true
+sudo pkill -f "show-dnsmasq.conf" 2>/dev/null || true
+sudo rm -f /tmp/listener-dnsmasq.conf /tmp/show-dnsmasq.conf /tmp/dnsmasq-wlan*.conf
 
 sudo systemctl daemon-reload
 ok "Services stopped and removed"
@@ -58,16 +52,22 @@ ok "Services stopped and removed"
 # --- Remove nftables rules ---
 info "Removing nftables rules..."
 if [ -x /usr/sbin/nft ]; then
+  # Remove old-format tables
   sudo /usr/sbin/nft delete table inet listener_ap 2>/dev/null || true
   sudo /usr/sbin/nft delete table inet show_ap 2>/dev/null || true
   sudo /usr/sbin/nft delete table inet listener_filter 2>/dev/null || true
+  # Remove per-interface tables (v4.1+ format: listener_wlan0, listener_wlan1, etc.)
+  for tbl in $(sudo /usr/sbin/nft list tables 2>/dev/null | grep 'listener_wlan' | awk '{print $3}'); do
+    sudo /usr/sbin/nft delete table inet "$tbl" 2>/dev/null || true
+  done
 fi
 
-# Remove policy routing
-sudo ip rule del fwmark 0x64 table 100 2>/dev/null || true
-sudo ip route flush table 100 2>/dev/null || true
-sudo ip rule del fwmark 0xC8 table 200 2>/dev/null || true
-sudo ip route flush table 200 2>/dev/null || true
+# Remove policy routing (marks 0x64-0x6F cover up to 12 interfaces)
+for i in $(seq 100 111); do
+  HEX=$(printf '0x%02X' $i)
+  sudo ip rule del fwmark $HEX table $i 2>/dev/null || true
+  sudo ip route flush table $i 2>/dev/null || true
+done
 ok "Network rules removed"
 
 # --- Remove Apache config ---
@@ -151,6 +151,16 @@ if [ -f "$CUSTOM_JS" ] && grep -q "fpp-eavesdrop" "$CUSTOM_JS" 2>/dev/null; then
   ok "Old custom.js injection removed"
 fi
 
+# --- Restore FPP tethering (if SBS mode disabled it) ---
+info "Restoring FPP tether setting..."
+TETHER_RESTORE=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H "Content-Type: application/json" \
+  -d '"0"' http://127.0.0.1/api/settings/EnableTethering 2>/dev/null || echo "000")
+if [ "$TETHER_RESTORE" = "200" ]; then
+  ok "FPP tether restored to 'conditional' (FPP controls WiFi)"
+else
+  warn "Could not restore tether setting (FPP API unavailable?)"
+fi
+
 # --- Restart Apache ---
 info "Restarting Apache..."
 sudo systemctl restart apache2 2>/dev/null || sudo apachectl restart 2>/dev/null || true
@@ -164,3 +174,4 @@ printf '%b\n' "${GREEN}  Uninstall successful! (was v${VERSION})${NC}"
 echo "========================================="
 echo ""
 info "FPP network settings are preserved. Reboot recommended."
+info "FPP will manage WiFi on next reboot."

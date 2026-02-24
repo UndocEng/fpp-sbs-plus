@@ -83,3 +83,35 @@ code {
 .btn-sm {
     margin-bottom: 2px;
 }
+
+/* Fix alert contrast in FPP's dark theme — force dark text on light backgrounds */
+.iface-card .alert-info {
+    background: #1b4d5c;
+    border-color: #2a6a7a;
+    color: #c8e6ef;
+}
+.iface-card .alert-warning {
+    background: #5c4b1b;
+    border-color: #7a6a2a;
+    color: #f0e0b0;
+}
+.iface-card .alert-info strong,
+.iface-card .alert-warning strong {
+    color: #fff;
+}
+
+/* Connected clients table inside AP cards */
+.iface-card .client-table {
+    font-size: 0.8em;
+    margin: 0;
+}
+.iface-card .client-table td {
+    padding: 0.2rem 0.4rem;
+    border-color: #444;
+}
+.iface-card .client-table th {
+    padding: 0.2rem 0.4rem;
+    border-color: #555;
+    font-weight: 600;
+    font-size: 0.85em;
+}

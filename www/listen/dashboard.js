@@ -2,7 +2,11 @@
 // dashboard.js — Eavesdrop Network Dashboard
 // =============================================================================
 // Card-based network configuration. Each interface gets a card with a
-// configurable role. Internet/Show roles use FPP's API; Listener uses ours.
+// configurable role:
+//   SBS:          Single Board Show — Pi creates admin AP for WLED/show devices
+//   Listener:     Listener AP — isolated public AP with captive portal
+//   Show Network: Pi joins existing WiFi (client mode via wpa_supplicant)
+//   Unused:       Interface disabled
 //
 // Served directly by Apache from /listen/ (not through FPP's plugin.php
 // handler which produces malformed Content-Type headers).
@@ -62,7 +66,6 @@ function fppAPI(method, path, data, callback) {
 // =============================================================================
 
 function loadDashboard() {
-    // Fetch interfaces + roles from our API, then FPP interface data
     pluginAPI('get_interfaces', null, function(res) {
         if (!res.success) return;
         currentInterfaces = res.interfaces;
@@ -70,7 +73,6 @@ function loadDashboard() {
         pluginAPI('get_roles', null, function(roleRes) {
             if (roleRes.success) currentRoles = roleRes.roles;
 
-            // Also get FPP's interface data for IP/config details
             fppAPI('GET', 'interface', null, function(fppData) {
                 currentFppMap = {};
                 if (Array.isArray(fppData)) {
@@ -88,11 +90,11 @@ function loadDashboard() {
 function renderCards(interfaces, roles, fppMap) {
     var container = $('#interface-cards');
     container.empty();
-    var hasListener = false;
+    var hasAP = false;
 
     interfaces.forEach(function(iface) {
         var role = roles[iface.name] || '';
-        if (role === 'listener') hasListener = true;
+        if (role === 'sbs' || role === 'listener') hasAP = true;
 
         var colSize = 'col-lg-6';
         var card = $('<div>').addClass(colSize);
@@ -100,16 +102,7 @@ function renderCards(interfaces, roles, fppMap) {
         container.append(card);
     });
 
-    // Show/hide clients section
-    if (hasListener) {
-        $('#clients-section').show();
-        loadClients();
-        startClientRefresh();
-    } else {
-        $('#clients-section').hide();
-    }
-
-    // Update quick links (use relative paths so they work from any IP the admin is on)
+    // Update quick links
     $('#link-listener').attr('href', '/listen/listen.html');
     $('#link-qrcode').attr('href', '/qrcode.html');
     $('#link-sign').attr('href', '/print-sign.html');
@@ -119,7 +112,6 @@ function buildCard(iface, role, fppData) {
     var statusColor = iface.operstate === 'up' ? 'success' : 'secondary';
     var statusText = iface.operstate === 'up' ? 'Connected' : (iface.operstate === 'down' ? 'Down' : iface.operstate);
 
-    // Icon based on type
     var icon = 'fa-ethernet';
     if (iface.type === 'wifi' || iface.type === 'wifi-usb') icon = 'fa-wifi';
 
@@ -143,24 +135,22 @@ function buildCard(iface, role, fppData) {
     html += '<select class="form-select role-select" data-iface="' + iface.name + '">';
     html += '<option value=""' + (role === '' ? ' selected' : '') + '>-- Select Role --</option>';
 
-    // Only show appropriate roles based on interface type
-    var internetLabel = iface.wireless ? 'Internet / Tether' : 'Internet / Management';
-    html += '<option value="internet"' + (role === 'internet' ? ' selected' : '') + '>' + internetLabel + '</option>';
     if (iface.wireless) {
-        html += '<option value="show"' + (role === 'show' ? ' selected' : '') + '>Show Network</option>';
-        html += '<option value="listener"' + (role === 'listener' ? ' selected' : '') + '>Listener Network (AP)</option>';
+        html += '<option value="sbs"' + (role === 'sbs' ? ' selected' : '') + '>Single Board Show</option>';
+        html += '<option value="listener"' + (role === 'listener' ? ' selected' : '') + '>Listener AP</option>';
+        html += '<option value="show_network"' + (role === 'show_network' ? ' selected' : '') + '>Show Network</option>';
     }
     html += '<option value="unused"' + (role === 'unused' ? ' selected' : '') + '>Unused</option>';
     html += '</select>';
     html += '</div></div>';
 
     // Role-specific settings
-    if (role === 'internet') {
-        html += buildInternetSettings(iface, fppData);
-    } else if (role === 'show') {
-        html += buildShowSettings(iface, fppData);
+    if (role === 'sbs') {
+        html += buildSBSSettings(iface);
     } else if (role === 'listener') {
         html += buildListenerSettings(iface);
+    } else if (role === 'show_network') {
+        html += buildShowNetworkSettings(iface, fppData);
     } else if (role === 'unused') {
         html += '<p class="text-muted mb-0"><i class="fas fa-power-off"></i> Interface not in use.</p>';
     } else {
@@ -174,9 +164,171 @@ function buildCard(iface, role, fppData) {
 }
 
 // =============================================================================
-// Internet/Management Role Settings
+// Single Board Show Role Settings
 // =============================================================================
-function buildInternetSettings(iface, fppData) {
+function buildSBSSettings(iface) {
+    var html = '';
+    html += '<div class="sbs-config-' + iface.name + '">';
+    html += '<div class="text-muted"><i class="fas fa-spinner fa-spin"></i> Loading SBS config...</div>';
+    html += '</div>';
+
+    setTimeout(function() { loadAPConfig(iface.name, 'sbs'); }, 100);
+    return html;
+}
+
+// =============================================================================
+// Listener AP Role Settings
+// =============================================================================
+function buildListenerSettings(iface) {
+    var html = '';
+    html += '<div class="listener-config-' + iface.name + '">';
+    html += '<div class="text-muted"><i class="fas fa-spinner fa-spin"></i> Loading AP config...</div>';
+    html += '</div>';
+
+    setTimeout(function() { loadAPConfig(iface.name, 'listener'); }, 100);
+    return html;
+}
+
+// =============================================================================
+// Shared AP Config Loader (SBS + Listener)
+// =============================================================================
+function loadAPConfig(ifaceName, role) {
+    pluginAPI('get_status', null, function(statusRes) {
+        pluginAPI('get_config', { interface: ifaceName }, function(cfgRes) {
+            if (!cfgRes.success) return;
+            var cfg = cfgRes.config;
+            var apIp = cfg.ap_ip || '192.168.50.1';
+            var isSBS = (role === 'sbs');
+            var containerClass = isSBS ? '.sbs-config-' : '.listener-config-';
+            var html = '';
+
+            // Service status badges
+            if (statusRes.success) {
+                html += '<div class="mb-3">';
+                html += svcBadge('AP', statusRes.services['listener-ap']);
+                html += svcBadge('WS-Sync', statusRes.services['ws-sync']);
+                if (!isSBS) {
+                    html += svcBadge('Firewall', statusRes.services['nftables']);
+                }
+                html += '</div>';
+            }
+
+            // Role description
+            if (isSBS) {
+                html += '<div class="alert alert-info py-2 mb-3" style="font-size:0.85em;">';
+                html += '<i class="fas fa-broadcast-tower me-1"></i> <strong>Single Board Show.</strong> ';
+                html += 'Creates a WPA2 access point for WLED controllers and other show devices. ';
+                html += 'Devices on this network can communicate freely with each other and the Pi.';
+                html += '</div>';
+            } else {
+                html += '<div class="alert alert-info py-2 mb-3" style="font-size:0.85em;">';
+                html += '<i class="fas fa-shield-alt me-1"></i> <strong>Isolated listener network.</strong> ';
+                html += 'Creates an access point with captive portal for audience phones. ';
+                html += 'Device-to-device traffic is blocked. Only audio sync and listen page are accessible.';
+                html += '</div>';
+            }
+
+            // Subnet conflict check
+            var conflicts = checkSubnetConflicts(apIp, ifaceName);
+            if (conflicts.length > 0) {
+                html += '<div class="alert alert-warning py-2 mb-3" style="font-size:0.85em;">';
+                html += '<i class="fas fa-exclamation-triangle me-1"></i> <strong>Subnet conflict!</strong> ';
+                html += 'The AP subnet <code>' + getSubnet24(apIp) + '.x</code> overlaps with: ';
+                conflicts.forEach(function(c, i) {
+                    if (i > 0) html += ', ';
+                    html += '<strong>' + c.iface + '</strong> (' + c.ip + ')';
+                });
+                html += '. Change the AP IP to a different subnet to avoid routing issues.';
+                html += '</div>';
+            }
+
+            // AP settings
+            html += inputRow(ifaceName, 'ssid', 'SSID', cfg.ssid || (isSBS ? 'EAVESDROP' : 'SHOW_AUDIO'), 'Network name', 'text', 32);
+
+            // Channel dropdown
+            html += '<div class="row mb-2">';
+            html += '<label class="col-sm-3 col-form-label">Channel</label>';
+            html += '<div class="col-sm-9">';
+            html += '<select class="form-select form-select-sm" id="field-' + ifaceName + '-channel" style="width:auto;display:inline-block;">';
+            for (var ch = 1; ch <= 11; ch++) {
+                var sel = (ch == (cfg.channel || 6)) ? ' selected' : '';
+                html += '<option value="' + ch + '"' + sel + '>' + ch + '</option>';
+            }
+            html += '</select></div></div>';
+
+            // Password
+            if (isSBS) {
+                html += inputRow(ifaceName, 'password', 'Password', cfg.password || '', '8-63 characters (required)', 'password');
+                html += '<div class="row mb-2"><div class="col-sm-9 offset-sm-3"><small class="form-text">WPA2 password required for SBS mode.</small></div></div>';
+            } else {
+                html += inputRow(ifaceName, 'password', 'Password', cfg.password || '', 'Open (no password)', 'password');
+                html += '<div class="row mb-2"><div class="col-sm-9 offset-sm-3"><small class="form-text">Leave blank for open network. 8-63 chars for WPA2.</small></div></div>';
+            }
+
+            html += inputRow(ifaceName, 'ap_ip', 'AP IP Address', apIp, '192.168.50.1');
+
+            // Save button
+            html += '<div class="mt-3">';
+            html += '<button class="btn btn-success btn-sm btn-save-ap" data-iface="' + ifaceName + '" data-role="' + role + '">';
+            html += '<i class="fas fa-save"></i> Save & Restart AP</button>';
+            html += '<span class="save-status-' + ifaceName + ' ms-2"></span>';
+            html += '</div>';
+
+            // Connected clients (inline at bottom of card)
+            html += '<hr class="my-3">';
+            html += '<div class="d-flex align-items-center justify-content-between mb-2">';
+            html += '<small class="fw-bold"><i class="fas fa-users me-1"></i> Connected Clients</small>';
+            html += '<button class="btn btn-outline-secondary btn-sm btn-refresh-card-clients" data-iface="' + ifaceName + '" style="padding:1px 8px;font-size:0.75em;">';
+            html += '<i class="fas fa-sync-alt"></i></button>';
+            html += '</div>';
+            html += '<div class="card-clients-' + ifaceName + '"><small class="text-muted">Loading...</small></div>';
+
+            $(containerClass + ifaceName).html(html);
+
+            // Load clients for this card
+            loadCardClients(ifaceName);
+        });
+    });
+}
+
+function loadCardClients(ifaceName) {
+    pluginAPI('get_clients', { interface: ifaceName }, function(res) {
+        var el = $('.card-clients-' + ifaceName);
+        if (!res.success || !res.clients || !res.clients.length) {
+            el.html('<small class="text-muted">No clients connected</small>');
+            return;
+        }
+        var html = '<table class="table table-sm table-dark client-table mb-0">';
+        html += '<tr><th>MAC</th><th>IP</th><th>Host</th><th>Signal</th></tr>';
+        res.clients.forEach(function(c) {
+            var signalClass = '';
+            if (c.signal) {
+                var dbm = parseInt(c.signal);
+                if (dbm >= -50) signalClass = 'text-success';
+                else if (dbm >= -70) signalClass = 'text-warning';
+                else signalClass = 'text-danger';
+            }
+            html += '<tr>';
+            html += '<td><code style="font-size:0.85em;">' + (c.mac || '--') + '</code></td>';
+            html += '<td>' + (c.ip || '--') + '</td>';
+            html += '<td>' + (c.hostname || '--') + '</td>';
+            html += '<td class="' + signalClass + '">' + (c.signal || '--') + '</td>';
+            html += '</tr>';
+        });
+        html += '</table>';
+        el.html(html);
+    });
+}
+
+function svcBadge(label, status) {
+    var color = status === 'active' ? 'success' : (status === 'inactive' ? 'secondary' : 'danger');
+    return '<span class="badge bg-' + color + ' me-1">' + label + '</span>';
+}
+
+// =============================================================================
+// Show Network Role Settings (Pi joins existing WiFi)
+// =============================================================================
+function buildShowNetworkSettings(iface, fppData) {
     var cfg = fppData.config || {};
     var proto = cfg.PROTO || 'dhcp';
     var addr = cfg.ADDRESS || '';
@@ -187,11 +339,18 @@ function buildInternetSettings(iface, fppData) {
     var currentIP = iface.ip || (proto === 'static' && addr ? addr + ' (configured)' : '(no IP)');
 
     var html = '';
+
+    html += '<div class="alert alert-info py-2 mb-3" style="font-size:0.85em;">';
+    html += '<i class="fas fa-wifi me-1"></i> <strong>Show Network.</strong> ';
+    html += 'Joins an existing WiFi network (venue network, show controller, etc.). ';
+    html += 'The Pi connects as a client — no access point is created on this interface.';
+    html += '</div>';
+
     html += '<div class="mb-2"><small class="text-muted">Current IP: <strong>' + currentIP + '</strong></small></div>';
 
-    // WiFi fields for wireless interfaces (tether to phone hotspot, etc.)
+    // WiFi fields
     if (iface.wireless) {
-        html += inputRow(iface.name, 'ssid', 'SSID', ssid, 'Phone hotspot or network name');
+        html += inputRow(iface.name, 'ssid', 'SSID', ssid, 'Network name');
         html += inputRow(iface.name, 'psk', 'Password', psk, 'WiFi password', 'password');
 
         // Scan button
@@ -202,73 +361,8 @@ function buildInternetSettings(iface, fppData) {
         html += '<span class="scan-status-' + iface.name + ' ms-2"></span>';
         html += '</div></div>';
 
-        // Scan results (hidden initially)
         html += '<div class="scan-results-' + iface.name + ' mb-2" style="display:none;"></div>';
     }
-
-    // Protocol radio
-    html += '<div class="row mb-2">';
-    html += '<label class="col-sm-3 col-form-label">Protocol</label>';
-    html += '<div class="col-sm-9">';
-    html += '<div class="form-check form-check-inline">';
-    html += '<input class="form-check-input proto-radio" type="radio" name="proto-' + iface.name + '" value="dhcp"' + (proto === 'dhcp' ? ' checked' : '') + ' data-iface="' + iface.name + '">';
-    html += '<label class="form-check-label">DHCP</label></div>';
-    html += '<div class="form-check form-check-inline">';
-    html += '<input class="form-check-input proto-radio" type="radio" name="proto-' + iface.name + '" value="static"' + (proto === 'static' ? ' checked' : '') + ' data-iface="' + iface.name + '">';
-    html += '<label class="form-check-label">Static</label></div>';
-    html += '</div></div>';
-
-    // Static fields (hidden if DHCP)
-    var staticDisplay = proto === 'static' ? '' : 'display:none;';
-    html += '<div class="static-fields-' + iface.name + '" style="' + staticDisplay + '">';
-    html += inputRow(iface.name, 'address', 'IP Address', addr, 'e.g. 192.168.1.100');
-    html += inputRow(iface.name, 'netmask', 'Netmask', mask, '255.255.255.0');
-    html += inputRow(iface.name, 'gateway', 'Gateway', gw, 'e.g. 192.168.1.1');
-    html += '</div>';
-
-    // Tethering section (uses FPP's built-in tethering)
-    html += buildTetherSection(iface);
-
-    // Save button
-    html += '<div class="mt-3">';
-    html += '<button class="btn btn-success btn-sm btn-save-fpp" data-iface="' + iface.name + '" data-role="internet">';
-    html += '<i class="fas fa-save"></i> Save & Apply</button>';
-    html += '<span class="save-status-' + iface.name + ' ms-2"></span>';
-    html += '</div>';
-
-    return html;
-}
-
-// =============================================================================
-// Show Network Role Settings
-// =============================================================================
-function buildShowSettings(iface, fppData) {
-    var cfg = fppData.config || {};
-    var proto = cfg.PROTO || 'dhcp';
-    var addr = cfg.ADDRESS || '';
-    var mask = cfg.NETMASK || '255.255.255.0';
-    var gw = cfg.GATEWAY || '';
-    var ssid = cfg.SSID || '';
-    var psk = cfg.PSK || '';
-    var currentIP = iface.ip || (proto === 'static' && addr ? addr + ' (configured)' : '(no IP)');
-
-    var html = '';
-    html += '<div class="mb-2"><small class="text-muted">Current IP: <strong>' + currentIP + '</strong></small></div>';
-
-    // WiFi SSID and password
-    html += inputRow(iface.name, 'ssid', 'SSID', ssid, 'Network name');
-    html += inputRow(iface.name, 'psk', 'Password', psk, 'WiFi password', 'password');
-
-    // Scan button
-    html += '<div class="row mb-2">';
-    html += '<div class="col-sm-9 offset-sm-3">';
-    html += '<button class="btn btn-info btn-sm btn-wifi-scan" data-iface="' + iface.name + '">';
-    html += '<i class="fas fa-search"></i> Scan WiFi</button>';
-    html += '<span class="scan-status-' + iface.name + ' ms-2"></span>';
-    html += '</div></div>';
-
-    // Scan results (hidden initially)
-    html += '<div class="scan-results-' + iface.name + ' mb-2" style="display:none;"></div>';
 
     // Protocol radio
     html += '<div class="row mb-2">';
@@ -285,17 +379,17 @@ function buildShowSettings(iface, fppData) {
     // Static fields
     var staticDisplay = proto === 'static' ? '' : 'display:none;';
     html += '<div class="static-fields-' + iface.name + '" style="' + staticDisplay + '">';
-    html += inputRow(iface.name, 'address', 'IP Address', addr, 'e.g. 10.1.66.201');
+    html += inputRow(iface.name, 'address', 'IP Address', addr, 'e.g. 192.168.1.100');
     html += inputRow(iface.name, 'netmask', 'Netmask', mask, '255.255.255.0');
-    html += inputRow(iface.name, 'gateway', 'Gateway', gw, 'e.g. 10.1.66.1');
+    html += inputRow(iface.name, 'gateway', 'Gateway', gw, 'e.g. 192.168.1.1');
     html += '</div>';
 
-    // Tethering section (uses FPP's built-in tethering)
+    // Tethering section (only for Show Network — NOT for SBS)
     html += buildTetherSection(iface);
 
     // Save button
     html += '<div class="mt-3">';
-    html += '<button class="btn btn-success btn-sm btn-save-fpp" data-iface="' + iface.name + '" data-role="show">';
+    html += '<button class="btn btn-success btn-sm btn-save-fpp" data-iface="' + iface.name + '" data-role="show_network">';
     html += '<i class="fas fa-save"></i> Save & Apply</button>';
     html += '<span class="save-status-' + iface.name + ' ms-2"></span>';
     html += '</div>';
@@ -304,7 +398,7 @@ function buildShowSettings(iface, fppData) {
 }
 
 // =============================================================================
-// Tethering Section (uses FPP's built-in tethering — no duplication)
+// Tethering Section (only for Show Network role)
 // =============================================================================
 function buildTetherSection(iface) {
     if (!iface.wireless) return '';
@@ -347,124 +441,6 @@ function loadTetherStatus() {
 }
 
 // =============================================================================
-// Listener Network Role Settings
-// =============================================================================
-function buildListenerSettings(iface) {
-    var html = '';
-    html += '<div class="listener-config-' + iface.name + '">';
-    html += '<div class="text-muted"><i class="fas fa-spinner fa-spin"></i> Loading AP config...</div>';
-    html += '</div>';
-
-    setTimeout(function() { loadListenerConfig(iface.name); }, 100);
-
-    return html;
-}
-
-function getSubnet24(ip) {
-    if (!ip) return '';
-    var parts = ip.replace(/\/.*/, '').split('.');
-    return parts.length >= 3 ? parts[0] + '.' + parts[1] + '.' + parts[2] : '';
-}
-
-function checkSubnetConflicts(apIp, listenerIface) {
-    var apSubnet = getSubnet24(apIp);
-    if (!apSubnet) return [];
-    var conflicts = [];
-    currentInterfaces.forEach(function(iface) {
-        if (iface.name === listenerIface) return;
-        var fpp = currentFppMap[iface.name];
-        if (!fpp) return;
-        var cfgAddr = (fpp.config && fpp.config.ADDRESS) ? fpp.config.ADDRESS : '';
-        if (cfgAddr && getSubnet24(cfgAddr) === apSubnet) {
-            conflicts.push({ iface: iface.label || iface.name, ip: cfgAddr, source: 'configured' });
-        }
-        var liveAddr = fpp.addr || '';
-        if (liveAddr && liveAddr !== cfgAddr && getSubnet24(liveAddr) === apSubnet) {
-            conflicts.push({ iface: iface.label || iface.name, ip: liveAddr, source: 'active' });
-        }
-    });
-    return conflicts;
-}
-
-function loadListenerConfig(ifaceName) {
-    pluginAPI('get_status', null, function(statusRes) {
-        pluginAPI('get_config', null, function(cfgRes) {
-            if (!cfgRes.success) return;
-            var cfg = cfgRes.config;
-            var apIp = cfg.ap_ip || '192.168.50.1';
-            var html = '';
-
-            // Service status row
-            if (statusRes.success) {
-                html += '<div class="mb-3">';
-                html += svcBadge('AP', statusRes.services['listener-ap']);
-                html += svcBadge('DNS', statusRes.services['dnsmasq']);
-                html += svcBadge('WS-Sync', statusRes.services['ws-sync']);
-                html += svcBadge('Firewall', statusRes.services['nftables']);
-                if (statusRes.clientCount > 0) {
-                    html += '<span class="badge bg-info ms-1">' + statusRes.clientCount + ' client' + (statusRes.clientCount !== 1 ? 's' : '') + '</span>';
-                }
-                html += '</div>';
-            }
-
-            // Network isolation notice
-            html += '<div class="alert alert-info py-2 mb-3" style="font-size:0.85em;">';
-            html += '<i class="fas fa-shield-alt me-1"></i> <strong>Isolated network.</strong> ';
-            html += 'This interface runs a standalone access point with its own DHCP, DNS, and firewall. ';
-            html += 'Devices on this network <strong>cannot</strong> reach the show network, internet, or FPP admin. ';
-            html += 'IP forwarding is disabled and all non-listener traffic is rejected.';
-            html += '</div>';
-
-            // Subnet conflict check
-            var conflicts = checkSubnetConflicts(apIp, ifaceName);
-            if (conflicts.length > 0) {
-                html += '<div class="alert alert-warning py-2 mb-3" style="font-size:0.85em;">';
-                html += '<i class="fas fa-exclamation-triangle me-1"></i> <strong>Subnet conflict!</strong> ';
-                html += 'The AP subnet <code>' + getSubnet24(apIp) + '.x</code> overlaps with: ';
-                conflicts.forEach(function(c, i) {
-                    if (i > 0) html += ', ';
-                    html += '<strong>' + c.iface + '</strong> (' + c.ip + ')';
-                });
-                html += '. Change the AP IP to a different subnet to avoid routing issues.';
-                html += '</div>';
-            }
-
-            // AP settings
-            html += inputRow(ifaceName, 'ssid', 'SSID', cfg.ssid || 'SHOW_AUDIO', 'Network name', 'text', 32);
-
-            // Channel dropdown
-            html += '<div class="row mb-2">';
-            html += '<label class="col-sm-3 col-form-label">Channel</label>';
-            html += '<div class="col-sm-9">';
-            html += '<select class="form-select form-select-sm" id="field-' + ifaceName + '-channel" style="width:auto;display:inline-block;">';
-            for (var ch = 1; ch <= 11; ch++) {
-                var sel = (ch == (cfg.channel || 6)) ? ' selected' : '';
-                html += '<option value="' + ch + '"' + sel + '>' + ch + '</option>';
-            }
-            html += '</select></div></div>';
-
-            html += inputRow(ifaceName, 'password', 'Password', '', 'Open (no password)', 'password');
-            html += '<div class="row mb-2"><div class="col-sm-9 offset-sm-3"><small class="form-text">Leave blank for open network. 8-63 chars for WPA2.</small></div></div>';
-            html += inputRow(ifaceName, 'ap_ip', 'AP IP Address', apIp, '192.168.50.1');
-
-            // Save button
-            html += '<div class="mt-3">';
-            html += '<button class="btn btn-success btn-sm btn-save-listener" data-iface="' + ifaceName + '">';
-            html += '<i class="fas fa-save"></i> Save & Restart AP</button>';
-            html += '<span class="save-status-' + ifaceName + ' ms-2"></span>';
-            html += '</div>';
-
-            $('.listener-config-' + ifaceName).html(html);
-        });
-    });
-}
-
-function svcBadge(label, status) {
-    var color = status === 'active' ? 'success' : (status === 'inactive' ? 'secondary' : 'danger');
-    return '<span class="badge bg-' + color + ' me-1">' + label + '</span>';
-}
-
-// =============================================================================
 // Form Helpers
 // =============================================================================
 function inputRow(iface, field, label, value, placeholder, type, maxlen) {
@@ -499,68 +475,38 @@ function getField(iface, field) {
     return $('#field-' + iface + '-' + field).val() || '';
 }
 
+function getSubnet24(ip) {
+    if (!ip) return '';
+    var parts = ip.replace(/\/.*/, '').split('.');
+    return parts.length >= 3 ? parts[0] + '.' + parts[1] + '.' + parts[2] : '';
+}
+
+function checkSubnetConflicts(apIp, listenerIface) {
+    var apSubnet = getSubnet24(apIp);
+    if (!apSubnet) return [];
+    var conflicts = [];
+    currentInterfaces.forEach(function(iface) {
+        if (iface.name === listenerIface) return;
+        var fpp = currentFppMap[iface.name];
+        if (!fpp) return;
+        var cfgAddr = (fpp.config && fpp.config.ADDRESS) ? fpp.config.ADDRESS : '';
+        if (cfgAddr && getSubnet24(cfgAddr) === apSubnet) {
+            conflicts.push({ iface: iface.label || iface.name, ip: cfgAddr, source: 'configured' });
+        }
+        var liveAddr = fpp.addr || '';
+        if (liveAddr && liveAddr !== cfgAddr && getSubnet24(liveAddr) === apSubnet) {
+            conflicts.push({ iface: iface.label || iface.name, ip: liveAddr, source: 'active' });
+        }
+    });
+    return conflicts;
+}
+
 // =============================================================================
 // Save Handlers
 // =============================================================================
 
-// Save Internet or Show role via FPP API
-function saveFPP(ifaceName, role) {
-    var proto = $('input[name="proto-' + ifaceName + '"]:checked').val() || 'dhcp';
-    var data = {
-        INTERFACE: ifaceName,
-        PROTO: proto
-    };
-
-    if (proto === 'static') {
-        data.ADDRESS = getField(ifaceName, 'address');
-        data.NETMASK = getField(ifaceName, 'netmask');
-        data.GATEWAY = getField(ifaceName, 'gateway');
-    }
-
-    // WiFi fields — include whenever the SSID field exists (Show or Internet on wireless)
-    if ($('#field-' + ifaceName + '-ssid').length) {
-        data.SSID = getField(ifaceName, 'ssid');
-        data.PSK = getField(ifaceName, 'psk');
-        data.HIDDEN = '';
-        data.WPA3 = '';
-        data.BACKUPSSID = '';
-        data.BACKUPPSK = '';
-        data.BACKUPHIDDEN = '';
-        data.BACKUPWPA3 = '';
-    }
-
-    var statusEl = $('.save-status-' + ifaceName);
-    statusEl.html('<i class="fas fa-spinner fa-spin"></i> Saving...');
-
-    // Save config, then apply, then fix WiFi PMF if wireless
-    fppAPI('POST', 'interface/' + ifaceName, data, function(res) {
-        if (res.status === 'OK') {
-            statusEl.html('<i class="fas fa-spinner fa-spin"></i> Applying...');
-            fppAPI('POST', 'interface/' + ifaceName + '/apply', {}, function(applyRes) {
-                if (data.SSID) {
-                    statusEl.html('<i class="fas fa-spinner fa-spin"></i> Connecting WiFi...');
-                    pluginAPI('fix_wifi', { interface: ifaceName }, function(fixRes) {
-                        var state = fixRes.state || 'unknown';
-                        if (state === 'COMPLETED') {
-                            statusEl.html('<span class="text-success"><i class="fas fa-check"></i> Connected!</span>');
-                        } else {
-                            statusEl.html('<span class="text-warning"><i class="fas fa-clock"></i> WiFi state: ' + state + ' (may take a moment)</span>');
-                        }
-                        setTimeout(function() { statusEl.html(''); loadDashboard(); }, 5000);
-                    });
-                } else {
-                    statusEl.html('<span class="text-success"><i class="fas fa-check"></i> Applied</span>');
-                    setTimeout(function() { statusEl.html(''); loadDashboard(); }, 3000);
-                }
-            });
-        } else {
-            statusEl.html('<span class="text-danger">Error: ' + (res.status || 'unknown') + '</span>');
-        }
-    });
-}
-
-// Save Listener role via our API
-function saveListener(ifaceName) {
+// Save SBS or Listener AP via our plugin API
+function saveAP(ifaceName) {
     var data = {
         interface: ifaceName,
         ssid: getField(ifaceName, 'ssid'),
@@ -585,6 +531,60 @@ function saveListener(ifaceName) {
             setTimeout(function() { statusEl.html(''); loadDashboard(); }, 3000);
         } else {
             statusEl.html('<span class="text-danger">' + res.error + '</span>');
+        }
+    });
+}
+
+// Save Show Network role via FPP API
+function saveShowNetwork(ifaceName) {
+    var proto = $('input[name="proto-' + ifaceName + '"]:checked').val() || 'dhcp';
+    var data = {
+        INTERFACE: ifaceName,
+        PROTO: proto
+    };
+
+    if (proto === 'static') {
+        data.ADDRESS = getField(ifaceName, 'address');
+        data.NETMASK = getField(ifaceName, 'netmask');
+        data.GATEWAY = getField(ifaceName, 'gateway');
+    }
+
+    if ($('#field-' + ifaceName + '-ssid').length) {
+        data.SSID = getField(ifaceName, 'ssid');
+        data.PSK = getField(ifaceName, 'psk');
+        data.HIDDEN = '';
+        data.WPA3 = '';
+        data.BACKUPSSID = '';
+        data.BACKUPPSK = '';
+        data.BACKUPHIDDEN = '';
+        data.BACKUPWPA3 = '';
+    }
+
+    var statusEl = $('.save-status-' + ifaceName);
+    statusEl.html('<i class="fas fa-spinner fa-spin"></i> Saving...');
+
+    fppAPI('POST', 'interface/' + ifaceName, data, function(res) {
+        if (res.status === 'OK') {
+            statusEl.html('<i class="fas fa-spinner fa-spin"></i> Applying...');
+            fppAPI('POST', 'interface/' + ifaceName + '/apply', {}, function(applyRes) {
+                if (data.SSID) {
+                    statusEl.html('<i class="fas fa-spinner fa-spin"></i> Connecting WiFi...');
+                    pluginAPI('fix_wifi', { interface: ifaceName }, function(fixRes) {
+                        var state = fixRes.state || 'unknown';
+                        if (state === 'COMPLETED') {
+                            statusEl.html('<span class="text-success"><i class="fas fa-check"></i> Connected!</span>');
+                        } else {
+                            statusEl.html('<span class="text-warning"><i class="fas fa-clock"></i> WiFi state: ' + state + ' (may take a moment)</span>');
+                        }
+                        setTimeout(function() { statusEl.html(''); loadDashboard(); }, 5000);
+                    });
+                } else {
+                    statusEl.html('<span class="text-success"><i class="fas fa-check"></i> Applied</span>');
+                    setTimeout(function() { statusEl.html(''); loadDashboard(); }, 3000);
+                }
+            });
+        } else {
+            statusEl.html('<span class="text-danger">Error: ' + (res.status || 'unknown') + '</span>');
         }
     });
 }
@@ -641,55 +641,13 @@ function showScanResults(ifaceName, res) {
     networks.forEach(function(net) {
         var ssid = net.SSID || '(hidden)';
         var signal = net.signal || '';
-            html += '<a href="#" class="list-group-item list-group-item-action scan-result-item py-1 px-2" data-ssid="' + escHtml(ssid) + '" data-iface="' + ifaceName + '">';
-            html += '<small>' + escHtml(ssid);
-            if (signal) html += ' <span class="text-muted">(' + signal + ')</span>';
-            html += '</small></a>';
+        html += '<a href="#" class="list-group-item list-group-item-action scan-result-item py-1 px-2" data-ssid="' + escHtml(ssid) + '" data-iface="' + ifaceName + '">';
+        html += '<small>' + escHtml(ssid);
+        if (signal) html += ' <span class="text-muted">(' + signal + ')</span>';
+        html += '</small></a>';
     });
     html += '</div>';
     resultsEl.show().html(html);
-}
-
-// =============================================================================
-// Connected Clients
-// =============================================================================
-function loadClients() {
-    pluginAPI('get_clients', null, function(res) {
-        var tbody = $('#clients-tbody');
-        tbody.empty();
-        if (!res.success || !res.clients || !res.clients.length) {
-            tbody.html('<tr><td colspan="5" class="text-muted text-center">No clients connected</td></tr>');
-            return;
-        }
-        res.clients.forEach(function(c) {
-            var signal = c.signal || '--';
-            var signalClass = '';
-            if (c.signal) {
-                var dbm = parseInt(c.signal);
-                if (dbm >= -50) signalClass = 'text-success';
-                else if (dbm >= -70) signalClass = 'text-warning';
-                else signalClass = 'text-danger';
-            }
-            tbody.append(
-                '<tr>' +
-                '<td><code>' + (c.mac || '--') + '</code></td>' +
-                '<td>' + (c.ip || '--') + '</td>' +
-                '<td>' + (c.hostname || '--') + '</td>' +
-                '<td class="' + signalClass + '">' + signal + '</td>' +
-                '<td>' + (c.connected || '--') + '</td>' +
-                '</tr>'
-            );
-        });
-    });
-}
-
-function startClientRefresh() {
-    if (clientRefreshTimer) clearInterval(clientRefreshTimer);
-    clientRefreshTimer = setInterval(function() {
-        if ($('#auto-refresh-clients').is(':checked') && $('#clients-section').is(':visible')) {
-            loadClients();
-        }
-    }, 5000);
 }
 
 // =============================================================================
@@ -755,7 +713,7 @@ function restartServiceBtn(service) {
 }
 
 // =============================================================================
-// Event Delegation (cards are dynamic, use delegation on container)
+// Event Delegation
 // =============================================================================
 $(document).ready(function() {
     loadDashboard();
@@ -783,17 +741,16 @@ $(document).ready(function() {
         }
     });
 
-    // Save FPP interface (Internet/Show)
-    $(document).on('click', '.btn-save-fpp', function() {
+    // Save AP config (SBS or Listener)
+    $(document).on('click', '.btn-save-ap', function() {
         var iface = $(this).data('iface');
-        var role = $(this).data('role');
-        saveFPP(iface, role);
+        saveAP(iface);
     });
 
-    // Save Listener config
-    $(document).on('click', '.btn-save-listener', function() {
+    // Save Show Network config via FPP API
+    $(document).on('click', '.btn-save-fpp', function() {
         var iface = $(this).data('iface');
-        saveListener(iface);
+        saveShowNetwork(iface);
     });
 
     // WiFi scan
@@ -825,8 +782,11 @@ $(document).ready(function() {
         }
     });
 
-    // Refresh clients
-    $('#btn-refresh-clients').on('click', loadClients);
+    // Refresh clients for a specific card
+    $(document).on('click', '.btn-refresh-card-clients', function() {
+        var iface = $(this).data('iface');
+        loadCardClients(iface);
+    });
 
     // Logs & diagnostics
     $('#btn-selftest').on('click', runSelfTest);

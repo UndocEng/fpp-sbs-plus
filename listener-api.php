@@ -71,20 +71,6 @@ switch ($action) {
         $content = @file_get_contents($readmePath) ?: '(README.md not found)';
         echo json_encode(['success' => true, 'content' => $content]);
         break;
-    // SBS+ Show AP management
-    case 'get_show_ap_config':
-        echo json_encode(getShowAPConfig());
-        break;
-    case 'save_show_ap_config':
-        echo json_encode(saveShowAPConfig(
-            $_POST['enabled'] ?? '0',
-            $_POST['ssid'] ?? '',
-            $_POST['ip'] ?? ''
-        ));
-        break;
-    case 'get_show_ap_clients':
-        echo json_encode(getShowAPClients());
-        break;
     default:
         echo json_encode(['success' => false, 'error' => 'Unknown action']);
 }
@@ -99,9 +85,10 @@ function getStatus() {
         'ws-sync'     => serviceStatus('ws-sync'),
     ];
 
-    // Check nftables
-    $nft = trim(shell_exec('sudo /usr/sbin/nft list table inet listener_filter 2>/dev/null') ?? '');
-    $services['nftables'] = !empty($nft) ? 'active' : 'inactive';
+    // Check nftables (look for any listener/show AP tables)
+    $nft = trim(shell_exec('sudo /usr/sbin/nft list tables 2>/dev/null') ?? '');
+    $hasNft = (strpos($nft, 'listener_') !== false || strpos($nft, 'show_ap') !== false);
+    $services['nftables'] = $hasNft ? 'active' : 'inactive';
 
     // Get AP interface and IP
     $iface = getAPInterface();
@@ -139,27 +126,41 @@ function getStatus() {
 // Configuration
 // =============================================================================
 function getConfig() {
-    global $hostapdConf;
+    $iface = $_POST['interface'] ?? $_GET['interface'] ?? '';
 
+    // If specific interface requested, return its config from roles.json
+    if ($iface && preg_match('/^wlan[0-9]+$/', $iface)) {
+        $cfg = getInterfaceConfig($iface);
+        $config = [
+            'interface' => $iface,
+            'ssid'      => $cfg['ssid'] ?? 'EAVESDROP',
+            'channel'   => strval($cfg['channel'] ?? 6),
+            'password'  => $cfg['password'] ?? '',
+            'ap_ip'     => $cfg['ip'] ?? '192.168.50.1',
+            'role'      => $cfg['role'] ?? '',
+            'interfaces' => getWirelessInterfaces(),
+        ];
+        $mask = $cfg['mask'] ?? 24;
+        $config['subnet_conflict'] = checkSubnetConflict($config['ap_ip'], intval($mask));
+        return ['success' => true, 'config' => $config];
+    }
+
+    // Legacy: no interface specified, return first AP interface config
+    global $hostapdConf;
     $config = [
-        'interface' => getHostapdValue('interface') ?: 'wlan1',
-        'ssid'      => getHostapdValue('ssid') ?: 'SHOW_AUDIO',
+        'interface' => getHostapdValue('interface') ?: 'wlan0',
+        'ssid'      => getHostapdValue('ssid') ?: 'EAVESDROP',
         'channel'   => getHostapdValue('channel') ?: '6',
         'wpa'       => getHostapdValue('wpa') ?: '0',
     ];
 
-    // Detect AP IP from ap.conf or current interface
-    $iface = $config['interface'];
+    $cfgIface = $config['interface'];
     $ip = getAPConfValue('AP_IP');
     if (!$ip) {
-        $ip = trim(shell_exec("ip addr show $iface 2>/dev/null | grep 'inet ' | awk '{print \$2}' | cut -d/ -f1") ?? '');
+        $ip = trim(shell_exec("ip addr show $cfgIface 2>/dev/null | grep 'inet ' | awk '{print \$2}' | cut -d/ -f1") ?? '');
     }
     $config['ap_ip'] = $ip ?: '192.168.50.1';
-
-    // Detect available wireless interfaces
     $config['interfaces'] = getWirelessInterfaces();
-
-    // Check subnet conflict
     $mask = getAPConfValue('AP_MASK') ?: '24';
     $config['subnet_conflict'] = checkSubnetConflict($config['ap_ip'], intval($mask));
 
@@ -167,20 +168,26 @@ function getConfig() {
 }
 
 function saveConfig() {
-    global $hostapdConf, $listenSync, $pluginDir;
+    global $listenSync;
 
-    $iface   = $_POST['interface'] ?? 'wlan1';
-    $ssid    = $_POST['ssid'] ?? 'SHOW_AUDIO';
+    $iface   = $_POST['interface'] ?? '';
+    $ssid    = $_POST['ssid'] ?? '';
     $channel = $_POST['channel'] ?? '6';
     $password = $_POST['password'] ?? '';
     $apIP    = $_POST['ap_ip'] ?? '192.168.50.1';
 
-    // Validate interface name (alphanumeric + numbers only)
+    // Validate interface name
     if (!preg_match('/^wlan[0-9]+$/', $iface)) {
         return ['success' => false, 'error' => 'Invalid interface name'];
     }
 
-    // Validate SSID (1-32 chars, printable)
+    // Get the role for this interface
+    $role = getRoleForInterface($iface);
+    if ($role !== 'sbs' && $role !== 'listener') {
+        return ['success' => false, 'error' => 'Interface must be assigned SBS or Listener AP role first'];
+    }
+
+    // Validate SSID
     if (strlen($ssid) < 1 || strlen($ssid) > 32) {
         return ['success' => false, 'error' => 'SSID must be 1-32 characters'];
     }
@@ -191,9 +198,15 @@ function saveConfig() {
         return ['success' => false, 'error' => 'Channel must be 1-11'];
     }
 
-    // Validate password (empty = open, or 8-63 chars for WPA2)
-    if ($password !== '' && (strlen($password) < 8 || strlen($password) > 63)) {
-        return ['success' => false, 'error' => 'Password must be 8-63 characters (or empty for open network)'];
+    // Validate password: SBS requires WPA2, Listener allows open
+    if ($role === 'sbs') {
+        if (strlen($password) < 8 || strlen($password) > 63) {
+            return ['success' => false, 'error' => 'SBS mode requires a password (8-63 characters)'];
+        }
+    } else {
+        if ($password !== '' && (strlen($password) < 8 || strlen($password) > 63)) {
+            return ['success' => false, 'error' => 'Password must be 8-63 characters (or empty for open network)'];
+        }
     }
 
     // Validate IP
@@ -201,16 +214,29 @@ function saveConfig() {
         return ['success' => false, 'error' => 'Invalid IP address'];
     }
 
-    // Build hostapd config
+    // Update roles.json with the new config
+    $roles = loadRoles();
+    $roles[$iface] = [
+        'role' => $role,
+        'ssid' => $ssid,
+        'channel' => $ch,
+        'password' => $password,
+        'ip' => $apIP,
+        'mask' => 24,
+    ];
+    writeRoles($roles);
+
+    // Build per-interface hostapd config
+    $apIsolate = ($role === 'listener') ? 1 : 0;
     $wpaBlock = '';
     if ($password !== '') {
-        $wpaBlock = "wpa=2\nwpa_passphrase=$password\nwpa_key_mgmt=WPA-PSK\nwpa_pairwise=CCMP";
+        $wpaBlock = "wpa=2\nwpa_passphrase=$password\nwpa_key_mgmt=WPA-PSK\nwpa_pairwise=CCMP\nrsn_pairwise=CCMP";
     } else {
         $wpaBlock = "wpa=0";
     }
 
     $hostapdContent = <<<CONF
-# hostapd-listener.conf — managed by Eavesdrop plugin
+# hostapd-$iface.conf — managed by Eavesdrop plugin (role: $role)
 interface=$iface
 driver=nl80211
 ssid=$ssid
@@ -222,81 +248,30 @@ ieee80211n=1
 auth_algs=1
 $wpaBlock
 ignore_broadcast_ssid=0
-ap_isolate=1
+ap_isolate=$apIsolate
 CONF;
 
-    // Write hostapd config via temp file + sudo tee
+    $hostapdFile = $listenSync . '/hostapd-' . $iface . '.conf';
     $tmp = tempnam('/tmp', 'hostapd_');
     file_put_contents($tmp, $hostapdContent . "\n");
-    exec("sudo /usr/bin/tee $hostapdConf < $tmp > /dev/null 2>&1", $out, $ret);
+    exec("sudo /usr/bin/tee $hostapdFile < $tmp > /dev/null 2>&1", $out, $ret);
     unlink($tmp);
     if ($ret !== 0) {
         return ['success' => false, 'error' => 'Failed to write hostapd config'];
     }
 
-    // Update ap.conf with interface and IP
-    updateAPConf(['WLAN_IF' => $iface, 'AP_IP' => $apIP]);
-
-    // Build dnsmasq config with the (possibly new) AP IP
-    $ipParts = explode('.', $apIP);
-    $subnet = $ipParts[0] . '.' . $ipParts[1] . '.' . $ipParts[2];
-    $dhcpStart = $subnet . '.10';
-    $dhcpEnd   = $subnet . '.250';
-
-    $dnsmasqContent = <<<CONF
-# dnsmasq.conf — managed by Eavesdrop plugin
-interface=$iface
-bind-dynamic
-dhcp-range=$dhcpStart,$dhcpEnd,255.255.255.0,12h
-listen-address=$apIP
-dhcp-option=3,$apIP
-dhcp-option=6,$apIP
-dhcp-option=114,http://$apIP/listen/portal-api.php
-address=/listen.local/$apIP
-address=/#/$apIP
-log-dhcp
-CONF;
-
-    $tmp = tempnam('/tmp', 'dnsmasq_');
-    file_put_contents($tmp, $dnsmasqContent . "\n");
-    exec("sudo /usr/bin/tee /etc/dnsmasq.conf < $tmp > /dev/null 2>&1", $out, $ret);
-    unlink($tmp);
-
-    // Update .htaccess IP references if IP changed
-    $htaccess = '/opt/fpp/www/.htaccess';
-    if (file_exists($htaccess)) {
-        exec("sudo /usr/bin/sed -i 's/192\\.168\\.50\\.1/$apIP/g' $htaccess 2>&1");
-        exec("sudo /usr/bin/sed -i 's/192\\\\\\.168\\\\\\.50\\\\\\./$subnet\\\\\\\\./g' $htaccess 2>&1");
-    }
-
-    // Update portal-api.php IP reference
-    $portalApi = '/home/fpp/media/www/listen/portal-api.php';
-    if (file_exists($portalApi)) {
-        exec("sudo /usr/bin/sed -i 's/192\\.168\\.50\\.1/$apIP/g' $portalApi 2>&1");
-    }
-
-    // Configure interface IP
-    exec("sudo /sbin/ip addr flush dev $iface 2>/dev/null");
-    exec("sudo /sbin/ip addr add $apIP/24 dev $iface 2>/dev/null");
-    exec("sudo /sbin/ip link set $iface up 2>/dev/null");
-
-    // Update nftables with new IP
-    updateNftables($iface, $apIP);
-
-    // Handle FPP tether when interface changes
-    if ($iface === 'wlan0') {
+    // Handle FPP tether for SBS on wlan0
+    if ($role === 'sbs' && $iface === 'wlan0') {
         disableFPPTetherForSBS();
-    } else {
-        restoreFPPTether();
     }
 
-    // Restart services
-    exec('sudo /usr/bin/systemctl restart dnsmasq 2>&1');
+    // Restart listener-ap service (it reads roles.json and configures all APs)
     exec('sudo /usr/bin/systemctl restart listener-ap 2>&1');
 
     $securityNote = $password !== '' ? "WPA2 ($ssid)" : "Open ($ssid)";
-    $msg = "AP restarted: $securityNote on $iface ($apIP)";
-    if ($iface === 'wlan0') $msg .= " SBS mode — FPP tether disabled.";
+    $roleLabel = $role === 'sbs' ? 'Single Board Show' : 'Listener AP';
+    $msg = "$roleLabel restarted: $securityNote on $iface ($apIP)";
+    if ($role === 'sbs' && $iface === 'wlan0') $msg .= " FPP tether disabled.";
     return ['success' => true, 'message' => $msg];
 }
 
@@ -304,72 +279,23 @@ CONF;
 // Connected Clients
 // =============================================================================
 function getClients() {
-    $clients = [];
-
-    // Parse DHCP leases: timestamp mac ip hostname client-id
-    $leases = @file('/var/lib/misc/dnsmasq.leases');
-    $leaseMap = [];
-    if ($leases) {
-        foreach ($leases as $line) {
-            $parts = preg_split('/\s+/', trim($line));
-            if (count($parts) >= 4) {
-                $leaseMap[strtolower($parts[1])] = [
-                    'mac'      => strtoupper($parts[1]),
-                    'ip'       => $parts[2],
-                    'hostname' => $parts[3] !== '*' ? $parts[3] : '',
-                    'expires'  => date('H:i:s', intval($parts[0])),
-                ];
+    // Accept optional interface parameter for per-card client lists
+    $iface = $_POST['interface'] ?? $_GET['interface'] ?? '';
+    if (!$iface || !preg_match('/^wlan[0-9]+$/', $iface)) {
+        // Fallback: get first AP interface from roles
+        $roles = loadRoles();
+        foreach ($roles as $k => $v) {
+            $r = is_array($v) ? ($v['role'] ?? '') : $v;
+            if ($r === 'sbs' || $r === 'listener') {
+                $iface = $k;
+                break;
             }
         }
+        if (!$iface) $iface = 'wlan0';
     }
 
-    // Get signal strength from hostapd
-    $iface = getAPInterface();
-    $staDump = shell_exec("sudo /usr/sbin/iw dev " . escapeshellarg($iface) . " station dump 2>/dev/null") ?? '';
-    $stations = [];
-    $currentMac = '';
-    foreach (explode("\n", $staDump) as $line) {
-        if (preg_match('/^Station\s+([0-9a-f:]+)/i', $line, $m)) {
-            $currentMac = strtolower($m[1]);
-            $stations[$currentMac] = ['signal' => '', 'connected' => ''];
-        } elseif ($currentMac) {
-            if (preg_match('/signal:\s+(-?\d+)\s+dBm/', $line, $m)) {
-                $stations[$currentMac]['signal'] = $m[1] . ' dBm';
-            }
-            if (preg_match('/connected time:\s+(\d+)\s+seconds/', $line, $m)) {
-                $secs = intval($m[1]);
-                $stations[$currentMac]['connected'] = sprintf('%02d:%02d:%02d', $secs / 3600, ($secs % 3600) / 60, $secs % 60);
-            }
-        }
-    }
-
-    // Merge lease data + station data
-    foreach ($leaseMap as $mac => $info) {
-        $signal = $stations[$mac]['signal'] ?? '';
-        $connected = $stations[$mac]['connected'] ?? '';
-        $clients[] = [
-            'mac'       => $info['mac'],
-            'ip'        => $info['ip'],
-            'hostname'  => $info['hostname'],
-            'signal'    => $signal,
-            'connected' => $connected,
-        ];
-    }
-
-    // Add stations not in leases (rare, but possible)
-    foreach ($stations as $mac => $info) {
-        if (!isset($leaseMap[$mac])) {
-            $clients[] = [
-                'mac'       => strtoupper($mac),
-                'ip'        => '',
-                'hostname'  => '',
-                'signal'    => $info['signal'],
-                'connected' => $info['connected'],
-            ];
-        }
-    }
-
-    return ['success' => true, 'clients' => $clients];
+    $clients = getClientsForInterface($iface);
+    return ['success' => true, 'clients' => $clients, 'interface' => $iface];
 }
 
 // =============================================================================
@@ -437,27 +363,47 @@ function restartService() {
 // =============================================================================
 function runSelfTest() {
     $results = [];
+    $roles = loadRoles();
 
-    // Check if the listener AP interface exists
-    $iface = getAPInterface();
-    $ifaceExists = !empty(trim(shell_exec("ip link show $iface 2>/dev/null") ?? ''));
-
-    // Service checks — skip listener-ap if AP interface doesn't exist
-    foreach (['listener-ap', 'dnsmasq', 'ws-sync'] as $svc) {
-        if ($svc === 'listener-ap' && !$ifaceExists) continue;
+    // Core services
+    foreach (['listener-ap', 'ws-sync'] as $svc) {
         $status = serviceStatus($svc);
         $results[] = ['test' => "$svc service", 'pass' => $status === 'active', 'detail' => $status];
     }
 
-    // AP interface IP check — skip if interface doesn't exist
-    if ($ifaceExists) {
+    // Per-interface checks for AP roles
+    foreach ($roles as $iface => $cfg) {
+        $role = is_array($cfg) ? ($cfg['role'] ?? '') : $cfg;
+        if ($role !== 'sbs' && $role !== 'listener') continue;
+
+        $ifaceExists = file_exists("/sys/class/net/$iface");
+        $roleLabel = $role === 'sbs' ? 'SBS' : 'Listener';
+
+        if (!$ifaceExists) {
+            $results[] = ['test' => "$iface ($roleLabel)", 'pass' => false, 'detail' => 'interface not found'];
+            continue;
+        }
+
+        // Check interface has IP
         $ip = trim(shell_exec("ip addr show $iface 2>/dev/null | grep 'inet ' | awk '{print \$2}'") ?? '');
-        $results[] = ['test' => "$iface IP", 'pass' => !empty($ip), 'detail' => $ip ?: 'no IP'];
+        $results[] = ['test' => "$iface IP ($roleLabel)", 'pass' => !empty($ip), 'detail' => $ip ?: 'no IP'];
+
+        // Check hostapd running for this interface
+        $hostapdRunning = !empty(trim(shell_exec("pgrep -f 'hostapd.*$iface' 2>/dev/null") ?? ''));
+        $results[] = ['test' => "$iface hostapd ($roleLabel)", 'pass' => $hostapdRunning, 'detail' => $hostapdRunning ? 'running' : 'stopped'];
     }
 
-    // nftables check
-    $nft = trim(shell_exec('sudo /usr/sbin/nft list table inet listener_filter 2>/dev/null') ?? '');
-    $results[] = ['test' => 'nftables firewall', 'pass' => !empty($nft), 'detail' => !empty($nft) ? 'active' : 'inactive'];
+    // nftables check (only needed if listener role exists)
+    $hasListener = false;
+    foreach ($roles as $iface => $cfg) {
+        $r = is_array($cfg) ? ($cfg['role'] ?? '') : $cfg;
+        if ($r === 'listener') { $hasListener = true; break; }
+    }
+    if ($hasListener) {
+        $nft = trim(shell_exec('sudo /usr/sbin/nft list tables 2>/dev/null') ?? '');
+        $hasNftRules = (strpos($nft, 'listener_') !== false);
+        $results[] = ['test' => 'nftables firewall', 'pass' => $hasNftRules, 'detail' => $hasNftRules ? 'active' : 'inactive'];
+    }
 
     // ws-sync port check
     $wsHttp = trim(shell_exec("curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/ 2>/dev/null") ?? '');
@@ -470,14 +416,6 @@ function runSelfTest() {
     // status.php check
     $http2 = trim(shell_exec("curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/listen/status.php 2>/dev/null") ?? '');
     $results[] = ['test' => 'status.php', 'pass' => $http2 === '200', 'detail' => "HTTP $http2"];
-
-    // Show AP check (if enabled)
-    $showConfig = getShowAPConfig();
-    if ($showConfig['enabled']) {
-        $showIface = $showConfig['show_iface'];
-        $showRunning = $showConfig['running'];
-        $results[] = ['test' => "Show AP ($showIface)", 'pass' => $showRunning, 'detail' => $showRunning ? 'running' : 'stopped'];
-    }
 
     $allPass = count(array_filter($results, function($r) { return !$r['pass']; })) === 0;
     return ['success' => true, 'allPass' => $allPass, 'results' => $results];
@@ -519,6 +457,12 @@ function getAllInterfaces() {
         elseif ($type === 'wifi') $label = "$name (WiFi)";
         elseif ($type === 'wifi-usb') $label = "$name (USB WiFi)";
 
+        // Extract role string from extended format
+        $roleVal = '';
+        if (isset($roles[$name])) {
+            $roleVal = is_array($roles[$name]) ? ($roles[$name]['role'] ?? '') : $roles[$name];
+        }
+
         $interfaces[] = [
             'name'      => $name,
             'type'      => $type,
@@ -526,7 +470,7 @@ function getAllInterfaces() {
             'operstate' => $operstate,
             'ip'        => $ip,
             'mac'       => $mac,
-            'role'      => $roles[$name] ?? '',
+            'role'      => $roleVal,
             'wireless'  => $isWireless,
         ];
     }
@@ -535,12 +479,16 @@ function getAllInterfaces() {
 }
 
 function getRoles() {
-    return ['success' => true, 'roles' => loadRoles()];
+    $roles = loadRoles();
+    // Return simple role map for dashboard (interface → role string)
+    $simpleRoles = [];
+    foreach ($roles as $k => $v) {
+        $simpleRoles[$k] = is_array($v) ? ($v['role'] ?? '') : $v;
+    }
+    return ['success' => true, 'roles' => $simpleRoles];
 }
 
 function saveRole() {
-    global $rolesFile;
-
     $iface = $_POST['interface'] ?? '';
     $role  = $_POST['role'] ?? '';
 
@@ -548,7 +496,7 @@ function saveRole() {
         return ['success' => false, 'error' => 'Invalid interface name'];
     }
 
-    $validRoles = ['internet', 'show', 'listener', 'unused', ''];
+    $validRoles = ['sbs', 'listener', 'show_network', 'unused', ''];
     if (!in_array($role, $validRoles)) {
         return ['success' => false, 'error' => 'Invalid role'];
     }
@@ -557,26 +505,177 @@ function saveRole() {
     if ($role === '' || $role === 'unused') {
         unset($roles[$iface]);
     } else {
-        $roles[$iface] = $role;
+        // Preserve existing config if interface already has settings
+        if (isset($roles[$iface]) && is_array($roles[$iface])) {
+            $roles[$iface]['role'] = $role;
+        } else {
+            // New role assignment — set defaults
+            $defaults = [
+                'sbs' => ['ssid' => 'EAVESDROP', 'channel' => 6, 'password' => 'Listen123', 'ip' => '192.168.50.1', 'mask' => 24],
+                'listener' => ['ssid' => 'SHOW_AUDIO', 'channel' => 11, 'password' => '', 'ip' => '192.168.60.1', 'mask' => 24],
+                'show_network' => [],
+            ];
+            $cfg = $defaults[$role] ?? [];
+            $cfg['role'] = $role;
+            $roles[$iface] = $cfg;
+        }
     }
 
-    // Write roles file
-    $json = json_encode($roles, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-    $tmp = tempnam('/tmp', 'roles_');
-    file_put_contents($tmp, $json . "\n");
-    exec("sudo /usr/bin/tee $rolesFile < $tmp > /dev/null 2>&1", $out, $ret);
-    unlink($tmp);
+    writeRoles($roles);
 
-    return ['success' => true, 'roles' => $roles];
+    // Extract simple role map for dashboard compatibility
+    $simpleRoles = [];
+    foreach ($roles as $k => $v) {
+        $simpleRoles[$k] = is_array($v) ? ($v['role'] ?? '') : $v;
+    }
+
+    return ['success' => true, 'roles' => $simpleRoles];
 }
 
 function loadRoles() {
     global $rolesFile;
-    if (!file_exists($rolesFile)) return [];
-    $json = @file_get_contents($rolesFile);
-    if (!$json) return [];
-    $roles = json_decode($json, true);
-    return is_array($roles) ? $roles : [];
+    $roles = [];
+    if (file_exists($rolesFile)) {
+        $json = @file_get_contents($rolesFile);
+        if ($json) {
+            $roles = json_decode($json, true);
+            if (!is_array($roles)) $roles = [];
+        }
+    }
+
+    // Migrate old format: {"wlan0": "listener"} → {"wlan0": {"role": "listener", ...}}
+    $needsMigration = false;
+    foreach ($roles as $iface => $val) {
+        if (is_string($val)) {
+            $needsMigration = true;
+            break;
+        }
+    }
+
+    if ($needsMigration) {
+        $roles = migrateRoles($roles);
+        writeRoles($roles);
+    } elseif (empty($roles) && file_exists('/home/fpp/listen-sync/ap.conf')) {
+        // No roles.json but ap.conf exists — migrate from ap.conf
+        $roles = migrateFromAPConf();
+        if (!empty($roles)) writeRoles($roles);
+    }
+
+    return $roles;
+}
+
+function migrateRoles($oldRoles) {
+    global $listenSync;
+    $newRoles = [];
+
+    foreach ($oldRoles as $iface => $val) {
+        if (is_string($val)) {
+            // Map old role names to new
+            $roleMap = ['internet' => 'show_network', 'show' => 'show_network', 'listener' => 'sbs'];
+            $role = isset($roleMap[$val]) ? $roleMap[$val] : $val;
+
+            $cfg = ['role' => $role];
+            if ($role === 'sbs' || $role === 'listener') {
+                // Try to read existing hostapd config for this interface
+                $hostapd = $listenSync . '/hostapd-listener.conf';
+                if (file_exists($hostapd)) {
+                    $hLines = @file($hostapd, FILE_IGNORE_NEW_LINES);
+                    if ($hLines) {
+                        foreach ($hLines as $line) {
+                            if (preg_match('/^ssid=(.+)/', $line, $m)) $cfg['ssid'] = $m[1];
+                            if (preg_match('/^channel=(\d+)/', $line, $m)) $cfg['channel'] = intval($m[1]);
+                            if (preg_match('/^wpa_passphrase=(.+)/', $line, $m)) $cfg['password'] = $m[1];
+                        }
+                    }
+                }
+                $cfg['ip'] = getAPConfValue('AP_IP') ?: '192.168.50.1';
+                $cfg['mask'] = intval(getAPConfValue('AP_MASK') ?: 24);
+                if (!isset($cfg['ssid'])) $cfg['ssid'] = 'EAVESDROP';
+                if (!isset($cfg['channel'])) $cfg['channel'] = 6;
+                if (!isset($cfg['password'])) $cfg['password'] = 'Listen123';
+            }
+            $newRoles[$iface] = $cfg;
+        } else {
+            $newRoles[$iface] = $val;
+        }
+    }
+
+    return $newRoles;
+}
+
+function migrateFromAPConf() {
+    global $listenSync;
+    $wlanIF = getAPConfValue('WLAN_IF') ?: 'wlan0';
+    $apIP = getAPConfValue('AP_IP') ?: '192.168.50.1';
+    $apMask = intval(getAPConfValue('AP_MASK') ?: 24);
+
+    $cfg = [
+        'role' => 'sbs',
+        'ssid' => 'EAVESDROP',
+        'channel' => 6,
+        'password' => 'Listen123',
+        'ip' => $apIP,
+        'mask' => $apMask,
+    ];
+
+    // Read existing hostapd config
+    $hostapd = $listenSync . '/hostapd-listener.conf';
+    if (file_exists($hostapd)) {
+        $hLines = @file($hostapd, FILE_IGNORE_NEW_LINES);
+        if ($hLines) {
+            foreach ($hLines as $line) {
+                if (preg_match('/^ssid=(.+)/', $line, $m)) $cfg['ssid'] = $m[1];
+                if (preg_match('/^channel=(\d+)/', $line, $m)) $cfg['channel'] = intval($m[1]);
+                if (preg_match('/^wpa_passphrase=(.+)/', $line, $m)) $cfg['password'] = $m[1];
+            }
+        }
+    }
+
+    $roles = [$wlanIF => $cfg];
+
+    // Check for show AP config
+    $showEnabled = getAPConfValue('SHOW_AP_ENABLED');
+    if ($showEnabled === '1') {
+        $showIF = ($wlanIF === 'wlan0') ? 'wlan1' : 'wlan0';
+        $showSSID = getAPConfValue('SHOW_AP_SSID') ?: 'SHOW_AUDIO';
+        $showIP = getAPConfValue('SHOW_AP_IP') ?: '192.168.60.1';
+        $showMask = intval(getAPConfValue('SHOW_AP_MASK') ?: 24);
+        $roles[$showIF] = [
+            'role' => 'listener',
+            'ssid' => $showSSID,
+            'channel' => 11,
+            'password' => '',
+            'ip' => $showIP,
+            'mask' => $showMask,
+        ];
+    }
+
+    return $roles;
+}
+
+function writeRoles($roles) {
+    global $rolesFile;
+    $json = json_encode($roles, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    $tmp = tempnam('/tmp', 'roles_');
+    file_put_contents($tmp, $json . "\n");
+    exec("sudo /usr/bin/tee $rolesFile < $tmp > /dev/null 2>&1");
+    unlink($tmp);
+}
+
+function getRoleForInterface($iface) {
+    $roles = loadRoles();
+    if (isset($roles[$iface]) && is_array($roles[$iface])) {
+        return $roles[$iface]['role'] ?? '';
+    }
+    return '';
+}
+
+function getInterfaceConfig($iface) {
+    $roles = loadRoles();
+    if (isset($roles[$iface]) && is_array($roles[$iface])) {
+        return $roles[$iface];
+    }
+    return ['role' => '', 'ssid' => '', 'channel' => 6, 'password' => '', 'ip' => '192.168.50.1', 'mask' => 24];
 }
 
 // =============================================================================
@@ -608,158 +707,6 @@ function fixWifiConnect() {
 // =============================================================================
 // SBS+ Show AP Management
 // =============================================================================
-function getShowAPConfig() {
-    $apIface = getAPInterface();
-    $showIface = ($apIface === 'wlan0') ? 'wlan1' : 'wlan0';
-    $hasShowIface = file_exists('/sys/class/net/' . $showIface);
-
-    $result = [
-        "success" => true,
-        "enabled" => false,
-        "ssid" => "SHOW_AUDIO",
-        "ip" => "192.168.60.1",
-        "mask" => "24",
-        "show_iface" => $showIface,
-        "has_show_iface" => $hasShowIface,
-        "running" => false,
-        "ap_iface" => $apIface
-    ];
-
-    // Read show AP config from ap.conf
-    $apConf = "/home/fpp/listen-sync/ap.conf";
-    if (file_exists($apConf)) {
-        $lines = file($apConf, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        if ($lines !== false) {
-            foreach ($lines as $line) {
-                $line = trim($line);
-                if ($line === '' || $line[0] === '#') continue;
-                if (strpos($line, 'SHOW_AP_ENABLED=') === 0) {
-                    $result["enabled"] = (substr($line, 16) === '1');
-                }
-                if (strpos($line, 'SHOW_AP_SSID=') === 0) {
-                    $result["ssid"] = substr($line, 13);
-                }
-                if (strpos($line, 'SHOW_AP_IP=') === 0) {
-                    $result["ip"] = substr($line, 11);
-                }
-                if (strpos($line, 'SHOW_AP_MASK=') === 0) {
-                    $result["mask"] = substr($line, 13);
-                }
-            }
-        }
-    }
-
-    // Check if show AP hostapd is running
-    exec("pgrep -f hostapd-show.conf 2>/dev/null", $out, $ret);
-    $result["running"] = ($ret === 0);
-
-    return $result;
-}
-
-function saveShowAPConfig($enabled, $ssid, $ip) {
-    $enabled = ($enabled === '1' || $enabled === 'true') ? '1' : '0';
-    $ssid = trim($ssid);
-    $ip = trim($ip);
-
-    // Validate SSID if provided
-    if ($ssid !== '') {
-        if (strlen($ssid) < 1 || strlen($ssid) > 32) {
-            return ["success" => false, "error" => "SSID must be 1-32 characters"];
-        }
-        if (!preg_match('/^[a-zA-Z0-9 _\-]+$/', $ssid)) {
-            return ["success" => false, "error" => "SSID can only contain letters, numbers, spaces, hyphens, underscores"];
-        }
-    }
-
-    // Validate IP if provided
-    if ($ip !== '') {
-        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-            return ["success" => false, "error" => "Invalid IPv4 address"];
-        }
-        $parts = explode('.', $ip);
-        if ($parts[0] === '0' || $parts[0] === '127' || intval($parts[0]) >= 224) {
-            return ["success" => false, "error" => "Reserved IP address"];
-        }
-    }
-
-    // Update ap.conf (preserve all existing lines, update show AP fields)
-    $apConf = "/home/fpp/listen-sync/ap.conf";
-    $lines = @file($apConf, FILE_IGNORE_NEW_LINES);
-    $newLines = [];
-    $foundEnabled = false;
-    $foundSSID = false;
-    $foundIP = false;
-
-    if ($lines !== false) {
-        foreach ($lines as $line) {
-            $trimmed = trim($line);
-            if (strpos($trimmed, 'SHOW_AP_ENABLED=') === 0) {
-                $newLines[] = "SHOW_AP_ENABLED=" . $enabled;
-                $foundEnabled = true;
-            } elseif ($ssid !== '' && strpos($trimmed, 'SHOW_AP_SSID=') === 0) {
-                $newLines[] = "SHOW_AP_SSID=" . $ssid;
-                $foundSSID = true;
-            } elseif ($ip !== '' && strpos($trimmed, 'SHOW_AP_IP=') === 0) {
-                $newLines[] = "SHOW_AP_IP=" . $ip;
-                $foundIP = true;
-            } else {
-                $newLines[] = $line;
-            }
-        }
-    }
-
-    if (!$foundEnabled) $newLines[] = "SHOW_AP_ENABLED=" . $enabled;
-    if ($ssid !== '' && !$foundSSID) $newLines[] = "SHOW_AP_SSID=" . $ssid;
-    if ($ip !== '' && !$foundIP) $newLines[] = "SHOW_AP_IP=" . $ip;
-
-    $content = implode("\n", $newLines) . "\n";
-    $tmpFile = tempnam(sys_get_temp_dir(), 'apconf_');
-    file_put_contents($tmpFile, $content);
-    exec("sudo /usr/bin/tee /home/fpp/listen-sync/ap.conf < " . escapeshellarg($tmpFile) . " > /dev/null 2>&1", $out, $ret);
-    unlink($tmpFile);
-    if ($ret !== 0) {
-        return ["success" => false, "error" => "Failed to write AP config"];
-    }
-
-    // Update hostapd-show.conf SSID if changed
-    if ($ssid !== '') {
-        $showHostapd = "/home/fpp/listen-sync/hostapd-show.conf";
-        $hLines = @file($showHostapd, FILE_IGNORE_NEW_LINES);
-        if ($hLines !== false) {
-            $hNewLines = [];
-            foreach ($hLines as $line) {
-                if (strpos($line, 'ssid=') === 0) {
-                    $hNewLines[] = "ssid=" . $ssid;
-                } else {
-                    $hNewLines[] = $line;
-                }
-            }
-            $hContent = implode("\n", $hNewLines) . "\n";
-            $tmpFile2 = tempnam(sys_get_temp_dir(), 'hostapd_');
-            file_put_contents($tmpFile2, $hContent);
-            exec("sudo /usr/bin/tee /home/fpp/listen-sync/hostapd-show.conf < " . escapeshellarg($tmpFile2) . " > /dev/null 2>&1", $out2, $ret2);
-            unlink($tmpFile2);
-        }
-    }
-
-    // Restart service
-    exec("sudo /usr/bin/systemctl restart listener-ap.service 2>&1", $out3, $ret3);
-
-    $msg = $enabled === '1' ? "Show AP enabled" : "Show AP disabled";
-    $msg .= ". Service restarting.";
-    if ($ssid !== '') $msg .= " SSID: " . $ssid . ".";
-    if ($ip !== '') $msg .= " IP: " . $ip . ".";
-
-    return ["success" => true, "message" => $msg];
-}
-
-function getShowAPClients() {
-    $apIface = getAPInterface();
-    $showIface = ($apIface === 'wlan0') ? 'wlan1' : 'wlan0';
-    $clients = getClientsForInterface($showIface);
-    return ["success" => true, "clients" => $clients, "count" => count($clients)];
-}
-
 // =============================================================================
 // Helpers
 // =============================================================================
@@ -829,62 +776,6 @@ function getAPConfValue($key) {
     return '';
 }
 
-function updateAPConf($values) {
-    $apConf = "/home/fpp/listen-sync/ap.conf";
-    $lines = @file($apConf, FILE_IGNORE_NEW_LINES);
-    $newLines = [];
-    $found = [];
-
-    if ($lines !== false) {
-        foreach ($lines as $line) {
-            $replaced = false;
-            foreach ($values as $key => $val) {
-                if (strpos(trim($line), $key . '=') === 0) {
-                    $newLines[] = $key . '=' . $val;
-                    $found[$key] = true;
-                    $replaced = true;
-                    break;
-                }
-            }
-            if (!$replaced) {
-                $newLines[] = $line;
-            }
-        }
-    }
-
-    // Append any values not found in existing file
-    foreach ($values as $key => $val) {
-        if (!isset($found[$key])) {
-            $newLines[] = $key . '=' . $val;
-        }
-    }
-
-    $content = implode("\n", $newLines) . "\n";
-    $tmpFile = tempnam(sys_get_temp_dir(), 'apconf_');
-    file_put_contents($tmpFile, $content);
-    exec("sudo /usr/bin/tee /home/fpp/listen-sync/ap.conf < " . escapeshellarg($tmpFile) . " > /dev/null 2>&1", $out, $ret);
-    unlink($tmpFile);
-    return $ret === 0;
-}
-
-function updateNftables($iface, $apIP) {
-    $nft = '/usr/sbin/nft';
-    if (!is_executable($nft)) return;
-
-    // Clear existing rules
-    exec("sudo $nft delete table inet listener_filter 2>/dev/null");
-
-    // Recreate with new IP
-    exec("sudo $nft add table inet listener_filter");
-    exec("sudo $nft add chain inet listener_filter wlan1_input '{ type filter hook input priority 0; policy accept; }'");
-    exec("sudo $nft add rule inet listener_filter wlan1_input iifname $iface udp dport '{67, 68}' accept");
-    exec("sudo $nft add rule inet listener_filter wlan1_input iifname $iface ip daddr $apIP udp dport 53 accept");
-    exec("sudo $nft add rule inet listener_filter wlan1_input iifname $iface ip daddr $apIP tcp dport 53 accept");
-    exec("sudo $nft add rule inet listener_filter wlan1_input iifname $iface ip daddr $apIP tcp dport '{80, 8080}' accept");
-    exec("sudo $nft add rule inet listener_filter wlan1_input iifname $iface meta l4proto tcp reject with tcp reset");
-    exec("sudo $nft add rule inet listener_filter wlan1_input iifname $iface reject");
-}
-
 function checkSubnetConflict($apIP, $cidr) {
     $apLong = ip2long($apIP);
     if ($apLong === false) return null;
@@ -921,8 +812,6 @@ function getClientsForInterface($iface) {
         return [];
     }
 
-    $clients = [];
-
     // Read DHCP leases
     $leases = @file("/var/lib/misc/dnsmasq.leases", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     $leaseMap = [];
@@ -931,30 +820,65 @@ function getClientsForInterface($iface) {
             $parts = preg_split('/\s+/', $line, 5);
             if (count($parts) >= 4) {
                 $leaseMap[strtolower($parts[1])] = [
-                    "ip" => $parts[2],
-                    "hostname" => ($parts[3] !== '*') ? $parts[3] : ''
+                    'ip' => $parts[2],
+                    'hostname' => ($parts[3] !== '*') ? $parts[3] : '',
                 ];
             }
         }
     }
 
-    // Read ARP table for interface
-    $arp = @file("/proc/net/arp", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    if ($arp !== false) {
-        foreach ($arp as $i => $line) {
-            if ($i === 0) continue;
-            $parts = preg_split('/\s+/', $line);
-            if (count($parts) >= 6 && $parts[5] === $iface && $parts[2] !== '0x0') {
-                $mac = strtolower($parts[3]);
-                $client = [
-                    "mac" => $mac,
-                    "ip" => $parts[0],
-                    "hostname" => ""
-                ];
-                if (isset($leaseMap[$mac])) {
-                    $client["hostname"] = $leaseMap[$mac]["hostname"];
+    // Get signal strength from station dump
+    $staDump = shell_exec("sudo /usr/sbin/iw dev " . escapeshellarg($iface) . " station dump 2>/dev/null") ?? '';
+    $stations = [];
+    $currentMac = '';
+    foreach (explode("\n", $staDump) as $line) {
+        if (preg_match('/^Station\s+([0-9a-f:]+)/i', $line, $m)) {
+            $currentMac = strtolower($m[1]);
+            $stations[$currentMac] = ['signal' => '', 'connected' => ''];
+        } elseif ($currentMac) {
+            if (preg_match('/signal:\s+(-?\d+)\s+dBm/', $line, $m)) {
+                $stations[$currentMac]['signal'] = $m[1] . ' dBm';
+            }
+            if (preg_match('/connected time:\s+(\d+)\s+seconds/', $line, $m)) {
+                $secs = intval($m[1]);
+                $stations[$currentMac]['connected'] = sprintf('%02d:%02d:%02d', $secs / 3600, ($secs % 3600) / 60, $secs % 60);
+            }
+        }
+    }
+
+    // Build client list from stations (connected to this AP)
+    $clients = [];
+    foreach ($stations as $mac => $info) {
+        $lease = $leaseMap[$mac] ?? null;
+        $clients[] = [
+            'mac' => strtoupper($mac),
+            'ip' => $lease ? $lease['ip'] : '',
+            'hostname' => $lease ? $lease['hostname'] : '',
+            'signal' => $info['signal'],
+            'connected' => $info['connected'],
+        ];
+    }
+
+    // Add lease entries not in station dump (recently disconnected, still have lease)
+    foreach ($leaseMap as $mac => $info) {
+        if (!isset($stations[$mac])) {
+            // Check ARP to verify this lease is for this interface
+            $arp = @file("/proc/net/arp", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            if ($arp !== false) {
+                foreach ($arp as $i => $aline) {
+                    if ($i === 0) continue;
+                    $parts = preg_split('/\s+/', $aline);
+                    if (count($parts) >= 6 && $parts[5] === $iface && strtolower($parts[3]) === $mac) {
+                        $clients[] = [
+                            'mac' => strtoupper($mac),
+                            'ip' => $info['ip'],
+                            'hostname' => $info['hostname'],
+                            'signal' => '',
+                            'connected' => '',
+                        ];
+                        break;
+                    }
                 }
-                $clients[] = $client;
             }
         }
     }

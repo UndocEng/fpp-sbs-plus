@@ -1,15 +1,15 @@
 <?php
 // =============================================================================
-// about.php — Eavesdrop About Page
+// about.php — SBS Audio Sync About Page
 // =============================================================================
-// Shown under Help > Eavesdrop in FPP's menu.
+// Shown under Help > SBS Audio Sync in FPP's menu.
 // FPP's plugin.php wrapper provides the header/nav/footer.
 // =============================================================================
 
 $version = @file_get_contents(dirname(__FILE__) . '/VERSION') ?: 'unknown';
 ?>
 
-<h3>Eavesdrop — Audio Sync for Listeners</h3>
+<h3>SBS with Audio Sync</h3>
 <p>Version: <strong><?php echo htmlspecialchars($version); ?></strong></p>
 
 <p>

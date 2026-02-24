@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# fpp_install.sh — FPP Eavesdrop SBS+ Plugin Install Script
+# fpp_install.sh — SBS with Audio Sync Plugin Install Script
 # =============================================================================
 # Called by FPP's plugin manager after cloning, or manually via:
 #   sudo ./scripts/fpp_install.sh
@@ -27,7 +27,7 @@ fail()  { printf '%b\n' "${RED}[FAIL]${NC} $1"; exit 1; }
 VERSION=$(cat "$PLUGIN_DIR/VERSION" 2>/dev/null || echo "unknown")
 echo ""
 echo "========================================="
-printf '%b\n' "${CYAN}  FPP Eavesdrop SBS+ - v${VERSION}${NC}"
+printf '%b\n' "${CYAN}  SBS with Audio Sync - v${VERSION}${NC}"
 echo "========================================="
 echo ""
 
@@ -170,88 +170,59 @@ info "Setting up listener config..."
 sudo mkdir -p "$LISTEN_SYNC"
 sudo chown fpp:fpp "$LISTEN_SYNC"
 
-# Deploy default AP config (if not already present)
-AP_CONF="$LISTEN_SYNC/ap.conf"
-if [ ! -f "$AP_CONF" ]; then
-  sudo tee "$AP_CONF" > /dev/null <<'EOF'
-# AP Configuration for FPP Eavesdrop SBS+
-# Edit via web UI or manually. Changes take effect on service restart.
-WLAN_IF=wlan0
-AP_IP=192.168.50.1
-AP_MASK=24
-
-# SBS+ Show AP (public listener on opposite interface)
-SHOW_AP_ENABLED=0
-SHOW_AP_SSID=SHOW_AUDIO
-SHOW_AP_IP=192.168.60.1
-SHOW_AP_MASK=24
+# Deploy roles.json (role-driven config, replaces ap.conf + hostapd-*.conf)
+ROLES_FILE="$LISTEN_SYNC/roles.json"
+if [ ! -f "$ROLES_FILE" ]; then
+  if [ -f "$LISTEN_SYNC/ap.conf" ]; then
+    # Migrate from legacy ap.conf — dashboard will complete migration on first load
+    info "Legacy ap.conf found — will migrate on first dashboard access"
+    echo '{}' | sudo tee "$ROLES_FILE" > /dev/null
+  else
+    # Fresh install — detect first wireless interface and assign SBS role
+    DEFAULT_WLAN=""
+    for w in /sys/class/net/wlan*; do
+      [ -d "$w" ] && DEFAULT_WLAN=$(basename "$w") && break
+    done
+    if [ -n "$DEFAULT_WLAN" ]; then
+      sudo tee "$ROLES_FILE" > /dev/null <<EOF
+{
+    "$DEFAULT_WLAN": {
+        "role": "sbs",
+        "ssid": "EAVESDROP",
+        "channel": 6,
+        "password": "Listen123",
+        "ip": "192.168.50.1",
+        "mask": 24
+    }
+}
 EOF
-  sudo chmod 644 "$AP_CONF"
-  info "Default AP config created (SBS mode, wlan0, IP: 192.168.50.1)"
-else
-  # Migrate: add show AP fields if missing from existing config
-  if ! grep -q 'SHOW_AP_ENABLED' "$AP_CONF" 2>/dev/null; then
-    sudo tee -a "$AP_CONF" > /dev/null <<'EOF'
-
-# SBS+ Show AP (public listener on opposite interface)
-SHOW_AP_ENABLED=0
-SHOW_AP_SSID=SHOW_AUDIO
-SHOW_AP_IP=192.168.60.1
-SHOW_AP_MASK=24
-EOF
-    info "SBS+ fields added to existing ap.conf"
+      info "Default roles.json created (SBS on $DEFAULT_WLAN, password: Listen123)"
+    else
+      echo '{}' | sudo tee "$ROLES_FILE" > /dev/null
+      warn "No wireless interface detected — empty roles.json created"
+    fi
   fi
-  ok "AP config exists, keeping current settings"
-fi
-
-# Read configured interface from ap.conf
-WLAN_IF="wlan0"
-if [ -f "$AP_CONF" ]; then
-  source "$AP_CONF"
-  WLAN_IF="${WLAN_IF:-wlan0}"
-fi
-
-# Deploy default hostapd config with WPA2 (if not already present)
-HOSTAPD_CONF="$LISTEN_SYNC/hostapd-listener.conf"
-if [ ! -f "$HOSTAPD_CONF" ]; then
-  sudo tee "$HOSTAPD_CONF" > /dev/null <<EOF
-interface=$WLAN_IF
-driver=nl80211
-ssid=EAVESDROP
-hw_mode=g
-channel=6
-country_code=US
-wmm_enabled=1
-ieee80211n=1
-auth_algs=1
-ignore_broadcast_ssid=0
-ap_isolate=0
-
-# WPA2 configuration
-wpa=2
-wpa_passphrase=Listen123
-wpa_key_mgmt=WPA-PSK
-wpa_pairwise=CCMP
-rsn_pairwise=CCMP
-EOF
-  sudo chmod 644 "$HOSTAPD_CONF"
-  info "Default WiFi password: Listen123"
+  sudo chmod 644 "$ROLES_FILE"
 else
-  ok "Hostapd config exists, keeping current settings"
+  ok "roles.json exists, keeping current settings"
 fi
 
-# Deploy show AP hostapd config (if not already present)
-SHOW_HOSTAPD="$LISTEN_SYNC/hostapd-show.conf"
-if [ ! -f "$SHOW_HOSTAPD" ]; then
-  sudo cp -f "$PLUGIN_DIR/config/hostapd-show.conf" "$SHOW_HOSTAPD"
-  sudo chmod 644 "$SHOW_HOSTAPD"
-  ok "Show AP hostapd config deployed"
-else
-  ok "Show AP hostapd config exists, keeping current settings"
+# Determine first AP interface from roles.json (for service start check)
+WLAN_IF=""
+if [ -f "$ROLES_FILE" ]; then
+  WLAN_IF=$(python3 -c "
+import json
+try:
+    roles = json.load(open('$ROLES_FILE'))
+    for iface, cfg in roles.items():
+        role = cfg.get('role','') if isinstance(cfg, dict) else cfg
+        if role in ('sbs','listener'):
+            print(iface)
+            break
+except: pass
+" 2>/dev/null)
 fi
-
-# Deploy .htaccess-show template (always update — template, not user config)
-sudo cp -f "$PLUGIN_DIR/www/.htaccess-show" "$LISTEN_SYNC/htaccess-show.template" 2>/dev/null || true
+[ -z "$WLAN_IF" ] && WLAN_IF="wlan0"
 
 # Deploy ws-sync-server.py
 sudo cp -f "$PLUGIN_DIR/server/ws-sync-server.py" "$LISTEN_SYNC/ws-sync-server.py"
@@ -299,10 +270,8 @@ fi
 info "Configuring sudoers..."
 SUDOERS_FILE="/etc/sudoers.d/listener-sync"
 sudo tee "$SUDOERS_FILE" > /dev/null <<'EOF'
-# FPP Eavesdrop SBS+ — allow www-data to manage services and config
-www-data ALL=(ALL) NOPASSWD: /usr/bin/tee /home/fpp/listen-sync/hostapd-listener.conf
-www-data ALL=(ALL) NOPASSWD: /usr/bin/tee /home/fpp/listen-sync/hostapd-show.conf
-www-data ALL=(ALL) NOPASSWD: /usr/bin/tee /home/fpp/listen-sync/ap.conf
+# SBS with Audio Sync — allow www-data to manage services and config
+www-data ALL=(ALL) NOPASSWD: /usr/bin/tee /home/fpp/listen-sync/hostapd-*
 www-data ALL=(ALL) NOPASSWD: /usr/bin/tee /home/fpp/listen-sync/roles.json
 www-data ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/dnsmasq.conf
 www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart listener-ap.service
@@ -416,15 +385,10 @@ fi
 
 # nftables (if running via listener-ap)
 if [ -x /usr/sbin/nft ]; then
-  /usr/sbin/nft list tables 2>/dev/null | grep -q 'listener_ap\|show_ap' && ok "nftables: active" || info "nftables: will activate when AP starts"
+  /usr/sbin/nft list tables 2>/dev/null | grep -q 'listener_' && ok "nftables: active" || info "nftables: will activate when AP starts"
 fi
 
 # --- Summary ---
-AP_SSID=$(grep '^ssid=' "$LISTEN_SYNC/hostapd-listener.conf" 2>/dev/null | cut -d= -f2 || echo "EAVESDROP")
-AP_IP=$(grep '^AP_IP=' "$LISTEN_SYNC/ap.conf" 2>/dev/null | cut -d= -f2 || echo "192.168.50.1")
-SHOW_ENABLED=$(grep '^SHOW_AP_ENABLED=' "$LISTEN_SYNC/ap.conf" 2>/dev/null | cut -d= -f2 || echo "0")
-SHOW_SSID=$(grep '^SHOW_AP_SSID=' "$LISTEN_SYNC/ap.conf" 2>/dev/null | cut -d= -f2 || echo "SHOW_AUDIO")
-SHOW_IP=$(grep '^SHOW_AP_IP=' "$LISTEN_SYNC/ap.conf" 2>/dev/null | cut -d= -f2 || echo "192.168.60.1")
 LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 [ -z "$LOCAL_IP" ] && LOCAL_IP="YOUR_FPP_IP"
 
@@ -436,23 +400,34 @@ else
   printf '%b\n' "${RED}  Install completed with $ERRORS error(s). v${VERSION}${NC}"
 fi
 echo "========================================="
-echo "  FPP Dashboard: Status > Eavesdrop"
-echo "  Admin:  http://${AP_IP}/listen/admin.html"
+echo "  FPP Dashboard: Status > SBS Audio Sync"
 echo "  Sync:   WebSocket (ws://${LOCAL_IP}/ws)"
-if [ -e "/sys/class/net/$WLAN_IF" ]; then
-  SBS_NOTE=""
-  [ "$WLAN_IF" = "wlan0" ] && SBS_NOTE=" (SBS mode)"
-  echo "  WiFi:   ${AP_SSID} (WPA2) on ${WLAN_IF}${SBS_NOTE}"
-  echo "  AP IP:  ${AP_IP}"
-  echo "  Pass:   Listen123 (change via web UI)"
+
+# Show configured interfaces from roles.json
+if [ -f "$LISTEN_SYNC/roles.json" ]; then
+  python3 -c "
+import json
+try:
+    roles = json.load(open('$LISTEN_SYNC/roles.json'))
+    for iface, cfg in roles.items():
+        if not isinstance(cfg, dict): continue
+        role = cfg.get('role','')
+        if role == 'sbs':
+            ssid = cfg.get('ssid','EAVESDROP')
+            ip = cfg.get('ip','192.168.50.1')
+            print(f'  SBS AP:   {ssid} (WPA2) on {iface} ({ip})')
+            print(f'  Admin:  http://{ip}/listen/admin.html')
+        elif role == 'listener':
+            ssid = cfg.get('ssid','SHOW_AUDIO')
+            ip = cfg.get('ip','192.168.60.1')
+            pw = cfg.get('password','')
+            sec = 'WPA2' if pw else 'open'
+            print(f'  Listen:   {ssid} ({sec}) on {iface} ({ip})')
+            print(f'  Public: http://{ip}/listen/')
+except: pass
+" 2>/dev/null
 fi
-if [ "$SHOW_ENABLED" = "1" ]; then
-  SHOW_IF=$([[ "$WLAN_IF" == "wlan0" ]] && echo "wlan1" || echo "wlan0")
-  echo "  SBS+:   ${SHOW_SSID} (open) on ${SHOW_IF}"
-  echo "          Public: http://${SHOW_IP}/listen/"
-else
-  echo "  SBS+:   Disabled (enable via web UI)"
-fi
+
 echo "========================================="
 if [ $ERRORS -ne 0 ]; then
   echo "  Check: journalctl -u ws-sync -f"
