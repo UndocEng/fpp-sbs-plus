@@ -277,7 +277,7 @@ RewriteCond %{HTTP_HOST} ^(captive\\.apple\\.com|connectivitycheck\\.gstatic\\.c
 RewriteRule ^ http://${L_IP}/listen/listen.html [R=302,L]
 
 RewriteCond %{REMOTE_ADDR} ^${L_SUBNET_ESC}
-RewriteCond %{REQUEST_URI} ^/listen/(listen\\.html|status\\.php|version\\.php|portal-api\\.php|detect\\.php|logo[^/]*\\.png)\$ [NC]
+RewriteCond %{REQUEST_URI} ^/listen(/|\$) [NC]
 RewriteRule ^ - [L]
 
 RewriteCond %{REMOTE_ADDR} ^${L_SUBNET_ESC}
