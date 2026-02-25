@@ -3,7 +3,9 @@
     "allow": [
       "Bash(python:*)",
       "Bash(pip install:*)",
-      "Bash(ssh:*)"
+      "Bash(ssh:*)",
+      "Bash(scp /c/Users/TNash/Documents/GitHub/fpp-eavesdrop-sbs-plus/www/listen/admin.php fpp@10.1.66.204:/home/fpp/fpp-eavesdrop-sbs-plus/www/listen/)",
+      "Bash(scp /c/Users/TNash/Documents/GitHub/fpp-eavesdrop-sbs-plus/VERSION fpp@10.1.66.204:/home/fpp/fpp-eavesdrop-sbs-plus/)"
     ]
   }
 }
