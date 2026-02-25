@@ -5,7 +5,18 @@
       "Bash(pip install:*)",
       "Bash(ssh:*)",
       "Bash(scp /c/Users/TNash/Documents/GitHub/fpp-eavesdrop-sbs-plus/www/listen/admin.php fpp@10.1.66.204:/home/fpp/fpp-eavesdrop-sbs-plus/www/listen/)",
-      "Bash(scp /c/Users/TNash/Documents/GitHub/fpp-eavesdrop-sbs-plus/VERSION fpp@10.1.66.204:/home/fpp/fpp-eavesdrop-sbs-plus/)"
+      "Bash(scp /c/Users/TNash/Documents/GitHub/fpp-eavesdrop-sbs-plus/VERSION fpp@10.1.66.204:/home/fpp/fpp-eavesdrop-sbs-plus/)",
+      "Bash(ssh-keygen -R 192.168.1.102)",
+      "Bash(sshpass -p 'falcon' ssh-copy-id -o StrictHostKeyChecking=no fpp@192.168.1.102)",
+      "Bash(curl -s -X POST \"http://192.168.1.102/api/command\" -H \"Content-Type: application/json\" -d '{\"\"command\"\":\"\"Run Script\"\",\"\"args\"\":[\"\"\"\",\"\"bash -c \\\\\"\"mkdir -p /home/fpp/.ssh && echo ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIH+BGOTxudthvUZ+hnonCV7rdoQGDD/1U3PGwlg6ivNe TNash@TIM-JET >> /home/fpp/.ssh/authorized_keys && chmod 700 /home/fpp/.ssh && chmod 600 /home/fpp/.ssh/authorized_keys\\\\\"\"\"\"]}')",
+      "Bash(PUB_KEY=\"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIH+BGOTxudthvUZ+hnonCV7rdoQGDD/1U3PGwlg6ivNe TNash@TIM-JET\")",
+      "Bash(curl -s -X POST \"http://192.168.1.102/api/command\" -H \"Content-Type: application/json\" -d \"{\"\"command\"\":\"\"Run Script\"\",\"\"args\"\":[\"\"\"\",\"\"bash -c ''mkdir -p /home/fpp/.ssh; echo $PUB_KEY >> /home/fpp/.ssh/authorized_keys; chmod 700 /home/fpp/.ssh; chmod 600 /home/fpp/.ssh/authorized_keys''\"\"]}\")",
+      "Bash(curl -s \"http://192.168.1.102/api/system/ssh_keys\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://192.168.1.102/)",
+      "Bash(curl -s http://192.168.1.102/api/plugin)",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s http://192.168.1.102/api/fppd/status)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f''FPPD: {d.get\\(\"\"status_name\"\",\"\"unknown\"\"\\)}, Version: {d.get\\(\"\"advancedView\"\",{}\\).get\\(\"\"Version\"\",\"\"?\"\"\\)}''\\)\")"
     ]
   }
 }

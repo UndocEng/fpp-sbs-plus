@@ -16,7 +16,7 @@
 
 $version = trim(@file_get_contents(dirname(__FILE__) . '/VERSION') ?: 'unknown');
 $vEnc = htmlspecialchars($version, ENT_QUOTES, 'UTF-8');
-$pluginName = 'fpp-eavesdrop';
+$pluginName = 'SBSPlus';
 ?>
 
 <!-- Cache-busted CSS/JS (served directly by Apache, not through FPP's PHP handler) -->

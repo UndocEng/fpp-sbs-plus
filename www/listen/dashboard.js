@@ -12,7 +12,7 @@
 // handler which produces malformed Content-Type headers).
 // =============================================================================
 
-var pluginName = 'fpp-eavesdrop';
+var pluginName = 'SBSPlus';
 var clientRefreshTimer = null;
 var currentInterfaces = [];
 var currentRoles = {};
@@ -96,8 +96,7 @@ function renderCards(interfaces, roles, fppMap) {
         var role = roles[iface.name] || '';
         if (role === 'sbs' || role === 'listener') hasAP = true;
 
-        var colSize = 'col-lg-6';
-        var card = $('<div>').addClass(colSize);
+        var card = $('<div>').addClass('col-lg-6');
         card.html(buildCard(iface, role, fppMap[iface.name] || {}));
         container.append(card);
     });
@@ -139,6 +138,8 @@ function buildCard(iface, role, fppData) {
         html += '<option value="sbs"' + (role === 'sbs' ? ' selected' : '') + '>Single Board Show</option>';
         html += '<option value="listener"' + (role === 'listener' ? ' selected' : '') + '>Listener AP</option>';
         html += '<option value="show_network"' + (role === 'show_network' ? ' selected' : '') + '>Show Network</option>';
+    } else {
+        html += '<option value="show_network"' + (role === 'show_network' ? ' selected' : '') + '>Network / Show Control</option>';
     }
     html += '<option value="unused"' + (role === 'unused' ? ' selected' : '') + '>Unused</option>';
     html += '</select>';
@@ -278,8 +279,12 @@ function loadAPConfig(ifaceName, role) {
             html += '<hr class="my-3">';
             html += '<div class="d-flex align-items-center justify-content-between mb-2">';
             html += '<small class="fw-bold"><i class="fas fa-users me-1"></i> Connected Clients</small>';
-            html += '<button class="btn btn-outline-secondary btn-sm btn-refresh-card-clients" data-iface="' + ifaceName + '" style="padding:1px 8px;font-size:0.75em;">';
+            html += '<div>';
+            html += '<button class="btn btn-outline-info btn-sm btn-scan-clients" data-iface="' + ifaceName + '" style="padding:1px 8px;font-size:0.75em;" title="Ping sweep to discover static-IP devices">';
+            html += '<i class="fas fa-search"></i> Scan IPs</button> ';
+            html += '<button class="btn btn-outline-secondary btn-sm btn-refresh-card-clients" data-iface="' + ifaceName + '" style="padding:1px 8px;font-size:0.75em;" title="Refresh client list">';
             html += '<i class="fas fa-sync-alt"></i></button>';
+            html += '</div>';
             html += '</div>';
             html += '<div class="card-clients-' + ifaceName + '"><small class="text-muted">Loading...</small></div>';
 
@@ -336,14 +341,22 @@ function buildShowNetworkSettings(iface, fppData) {
     var gw = cfg.GATEWAY || '';
     var ssid = cfg.SSID || '';
     var psk = cfg.PSK || '';
+    var dns1 = cfg.DNS1 || '';
+    var dns2 = cfg.DNS2 || '';
     var currentIP = iface.ip || (proto === 'static' && addr ? addr + ' (configured)' : '(no IP)');
 
     var html = '';
 
     html += '<div class="alert alert-info py-2 mb-3" style="font-size:0.85em;">';
-    html += '<i class="fas fa-wifi me-1"></i> <strong>Show Network.</strong> ';
-    html += 'Joins an existing WiFi network (venue network, show controller, etc.). ';
-    html += 'The Pi connects as a client - no access point is created on this interface.';
+    if (iface.wireless) {
+        html += '<i class="fas fa-wifi me-1"></i> <strong>Show Network.</strong> ';
+        html += 'Joins an existing WiFi network (venue network, show controller, etc.). ';
+        html += 'The Pi connects as a client &mdash; no access point is created on this interface.';
+    } else {
+        html += '<i class="fas fa-ethernet me-1"></i> <strong>Network / Show Control.</strong> ';
+        html += 'Wired network connection for show control, FPP remote access, and E1.31 output. ';
+        html += 'Configure DHCP or static IP settings below.';
+    }
     html += '</div>';
 
     html += '<div class="mb-2"><small class="text-muted">Current IP: <strong>' + currentIP + '</strong></small></div>';
@@ -382,6 +395,8 @@ function buildShowNetworkSettings(iface, fppData) {
     html += inputRow(iface.name, 'address', 'IP Address', addr, 'e.g. 192.168.1.100');
     html += inputRow(iface.name, 'netmask', 'Netmask', mask, '255.255.255.0');
     html += inputRow(iface.name, 'gateway', 'Gateway', gw, 'e.g. 192.168.1.1');
+    html += inputRow(iface.name, 'dns1', 'DNS 1', dns1, 'e.g. 8.8.8.8');
+    html += inputRow(iface.name, 'dns2', 'DNS 2', dns2, 'e.g. 8.8.4.4 (optional)');
     html += '</div>';
 
     // Tethering section (only for Show Network - NOT for SBS)
@@ -547,6 +562,8 @@ function saveShowNetwork(ifaceName) {
         data.ADDRESS = getField(ifaceName, 'address');
         data.NETMASK = getField(ifaceName, 'netmask');
         data.GATEWAY = getField(ifaceName, 'gateway');
+        data.DNS1 = getField(ifaceName, 'dns1');
+        data.DNS2 = getField(ifaceName, 'dns2');
     }
 
     if ($('#field-' + ifaceName + '-ssid').length) {
@@ -786,6 +803,22 @@ $(document).ready(function() {
     $(document).on('click', '.btn-refresh-card-clients', function() {
         var iface = $(this).data('iface');
         loadCardClients(iface);
+    });
+
+    // Scan IPs - on-demand ping sweep to discover static-IP devices
+    $(document).on('click', '.btn-scan-clients', function() {
+        var btn = $(this);
+        var iface = btn.data('iface');
+        var el = $('.card-clients-' + iface);
+        btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Scanning...');
+        pluginAPI('scan_clients', { interface: iface }, function(res) {
+            btn.prop('disabled', false).html('<i class="fas fa-search"></i> Scan IPs');
+            if (res.success) {
+                loadCardClients(iface);
+            } else {
+                el.html('<small class="text-danger">' + (res.error || 'Scan failed') + '</small>');
+            }
+        });
     });
 
     // Logs & diagnostics

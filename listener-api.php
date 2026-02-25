@@ -39,6 +39,9 @@ switch ($action) {
     case 'get_clients':
         echo json_encode(getClients());
         break;
+    case 'scan_clients':
+        echo json_encode(scanClients());
+        break;
     case 'get_logs':
         echo json_encode(getLogs());
         break;
@@ -66,7 +69,7 @@ switch ($action) {
     case 'get_readme':
         $readmePath = dirname(__FILE__) . '/README.md';
         if (!file_exists($readmePath)) {
-            $readmePath = '/home/fpp/media/plugins/fpp-eavesdrop/README.md';
+            $readmePath = '/home/fpp/media/plugins/SBSPlus/README.md';
         }
         $content = @file_get_contents($readmePath) ?: '(README.md not found)';
         echo json_encode(['success' => true, 'content' => $content]);
@@ -300,6 +303,36 @@ function getClients() {
     return ['success' => true, 'clients' => $clients, 'interface' => $iface];
 }
 
+// Scan subnet to discover static-IP devices, then return updated client list
+function scanClients() {
+    $iface = $_POST['interface'] ?? $_GET['interface'] ?? '';
+    if (!$iface || !preg_match('/^wlan[0-9]+$/', $iface)) {
+        return ['success' => false, 'error' => 'Interface required'];
+    }
+
+    // Get AP's subnet from roles.json
+    $roles = loadRoles();
+    $cfg = is_array($roles[$iface] ?? null) ? $roles[$iface] : [];
+    $apIp = $cfg['ip'] ?? '';
+    if (!$apIp || !preg_match('/^(\d+\.\d+\.\d+)\.\d+$/', $apIp, $m)) {
+        return ['success' => false, 'error' => 'No AP IP configured'];
+    }
+    $subnet = $m[1];
+
+    // Targeted ping sweep of DHCP range only (.10-.254), 50 at a time
+    for ($batch = 10; $batch <= 254; $batch += 50) {
+        $cmds = [];
+        $end = min($batch + 49, 254);
+        for ($i = $batch; $i <= $end; $i++) {
+            $cmds[] = "ping -c1 -W1 {$subnet}.{$i} >/dev/null 2>&1";
+        }
+        shell_exec("bash -c '" . implode(' & ', $cmds) . " & wait' 2>/dev/null");
+    }
+
+    $clients = getClientsForInterface($iface);
+    return ['success' => true, 'clients' => $clients, 'interface' => $iface, 'scanned' => true];
+}
+
 // =============================================================================
 // Logs
 // =============================================================================
@@ -513,7 +546,7 @@ function saveRole() {
         } else {
             // New role assignment - set defaults
             $defaults = [
-                'sbs' => ['ssid' => 'EAVESDROP', 'channel' => 6, 'password' => 'Listen123', 'ip' => '192.168.50.1', 'mask' => 24],
+                'sbs' => ['ssid' => 'EAVESDROP', 'channel' => 6, 'password' => 'Listen123', 'ip' => '192.168.40.1', 'mask' => 24],
                 'listener' => ['ssid' => 'SHOW_AUDIO', 'channel' => 11, 'password' => '', 'ip' => '192.168.50.1', 'mask' => 24],
                 'show_network' => [],
             ];
@@ -852,13 +885,28 @@ function getClientsForInterface($iface) {
         }
     }
 
+    // Read ARP table for this interface (maps MAC -> IP for static-IP devices)
+    $arpMap = [];
+    $arp = @file("/proc/net/arp", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if ($arp !== false) {
+        foreach ($arp as $i => $aline) {
+            if ($i === 0) continue;
+            $parts = preg_split('/\s+/', $aline);
+            // Flags 0x2 = complete ARP entry; skip 0x0 (incomplete)
+            if (count($parts) >= 6 && $parts[5] === $iface && $parts[2] === '0x2') {
+                $arpMap[strtolower($parts[3])] = $parts[0];
+            }
+        }
+    }
+
     // Build client list from stations (connected to this AP)
     $clients = [];
     foreach ($stations as $mac => $info) {
         $lease = $leaseMap[$mac] ?? null;
+        $arpIp = $arpMap[$mac] ?? '';
         $clients[] = [
             'mac' => strtoupper($mac),
-            'ip' => $lease ? $lease['ip'] : '',
+            'ip' => $lease ? $lease['ip'] : $arpIp,
             'hostname' => $lease ? $lease['hostname'] : '',
             'signal' => $info['signal'],
             'connected' => $info['connected'],
@@ -867,25 +915,14 @@ function getClientsForInterface($iface) {
 
     // Add lease entries not in station dump (recently disconnected, still have lease)
     foreach ($leaseMap as $mac => $info) {
-        if (!isset($stations[$mac])) {
-            // Check ARP to verify this lease is for this interface
-            $arp = @file("/proc/net/arp", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-            if ($arp !== false) {
-                foreach ($arp as $i => $aline) {
-                    if ($i === 0) continue;
-                    $parts = preg_split('/\s+/', $aline);
-                    if (count($parts) >= 6 && $parts[5] === $iface && strtolower($parts[3]) === $mac) {
-                        $clients[] = [
-                            'mac' => strtoupper($mac),
-                            'ip' => $info['ip'],
-                            'hostname' => $info['hostname'],
-                            'signal' => '',
-                            'connected' => '',
-                        ];
-                        break;
-                    }
-                }
-            }
+        if (!isset($stations[$mac]) && isset($arpMap[$mac])) {
+            $clients[] = [
+                'mac' => strtoupper($mac),
+                'ip' => $info['ip'],
+                'hostname' => $info['hostname'],
+                'signal' => '',
+                'connected' => '',
+            ];
         }
     }
 

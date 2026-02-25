@@ -5,9 +5,19 @@
  * FPP's Bootstrap 5 dark theme handles most styling.
  * ============================================================================= */
 
-/* Interface card grid - don't stretch shorter cards to match taller neighbors */
-#interface-cards {
-    align-items: flex-start;
+/* Interface card grid - masonry-style: 2 columns, cards sized to content */
+@media (min-width: 992px) {
+    #interface-cards {
+        display: block;
+        column-count: 2;
+        column-gap: 1rem;
+    }
+    #interface-cards > [class*="col-"] {
+        width: 100%;
+        max-width: 100%;
+        display: inline-block;
+        margin-bottom: 1rem;
+    }
 }
 
 /* Interface cards */

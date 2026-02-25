@@ -1,20 +1,20 @@
 <?php
-// FPP Plugin API endpoints for fpp-eavesdrop
+// FPP Plugin API endpoints for SBSPlus
 
-function getEndpointsfppeavesdrop() {
+function getEndpointsSBSPlus() {
     $result = array();
 
     $ep = array(
         'method' => 'GET',
         'endpoint' => 'headerIndicator',
-        'callback' => 'fppeavesdropHeaderIndicator'
+        'callback' => 'SBSPlusHeaderIndicator'
     );
     array_push($result, $ep);
 
     return $result;
 }
 
-function fppeavesdropHeaderIndicator() {
+function SBSPlusHeaderIndicator() {
     return json(array(
         'visible' => true,
         'icon' => 'fa-headphones',
