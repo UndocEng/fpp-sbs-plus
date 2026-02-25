@@ -50,8 +50,8 @@ The listener page is for **audience members**. It provides:
 
 | Mode | What it means | Hardware |
 |------|--------------|----------|
-| **SBS** (Single Board Show) | Admin Eavesdrop runs on wlan0 (onboard WiFi). E1.31 devices (WLED bulbs, controllers) share the same AP. No audience listener. | Pi only — no USB adapter needed |
-| **SBS+** (Single Board Show Plus) | SBS + adds a second AP on wlan1 (USB adapter) running the Phone Listener for audience phones. Two isolated networks on one Pi. | Pi + USB WiFi adapter |
+| **SBS** (Single Board Show) | One AP for admin + E1.31 show devices. No audience listener. | Pi + 1 WiFi radio (onboard or USB) |
+| **SBS+** (Single Board Show Plus) | SBS + adds a second AP for audience phones. Two isolated networks on one Pi. | Pi + 2 WiFi radios |
 
 ---
 
@@ -59,10 +59,10 @@ The listener page is for **audience members**. It provides:
 
 SBS+ runs **two WiFi access points** on one Raspberry Pi — one for the show owner, one for the audience:
 
-| AP | Interface | SSID (default) | Security | Purpose |
-|----|-----------|---------------|----------|---------|
-| **Admin Eavesdrop** | wlan0 (onboard BCM43455) | `EAVESDROP` | WPA2 | Admin control page + E1.31 show devices (WLED bulbs, controllers) |
-| **Phone Listener** | wlan1 (USB adapter) | `SHOW_AUDIO` | Open | Audience phones hear synced show audio via captive portal |
+| AP | Role | SSID (default) | Security | Purpose |
+|----|------|---------------|----------|---------|
+| **Admin/SBS** | `sbs` | `EAVESDROP` | WPA2 | Admin control page + E1.31 show devices (WLED bulbs, controllers) |
+| **Phone Listener** | `listener` | `SHOW_AUDIO` | Open | Audience phones hear synced show audio via captive portal |
 
 **How it works:**
 - The show owner connects to **EAVESDROP** (WPA2, default password `Listen123`) and opens `admin.html` to control the show
@@ -73,10 +73,26 @@ SBS+ runs **two WiFi access points** on one Raspberry Pi — one for the show ow
 
 **To enable SBS+ mode:**
 1. Plug in a USB WiFi adapter (for wlan1)
-2. Open the admin page → SBS+ Settings card → check "Enable"
+2. Open the plugin dashboard (Status > SBS Audio Sync) and assign roles to each interface
 3. Save & Restart
 
-**In SBS mode (no USB adapter):** Only wlan0 runs. The admin page and E1.31 devices share the same AP. The public listener page is still accessible but there's no separate audience AP.
+**In SBS mode (no USB adapter):** Only one interface runs. The admin page and E1.31 devices share the same AP. The public listener page is still accessible but there's no separate audience AP.
+
+### WiFi Adapter Recommendations
+
+The plugin is **interface-agnostic** — it reads `roles.json` and configures whatever `wlan*` interfaces are present. You can use any combination of onboard and USB WiFi:
+
+| Setup | Interfaces | Best for |
+|-------|-----------|----------|
+| **Onboard + USB** | wlan0 (onboard) = SBS, wlan1 (USB) = Listener | Most common. Simple, one adapter to buy. |
+| **Dual USB** | wlan0 + wlan1 (both USB) | Best range and reliability. Disable onboard WiFi with `dtoverlay=disable-wifi` in `/boot/config.txt`. Frees the shared onboard radio for Bluetooth. |
+| **Onboard only** | wlan0 (onboard) = SBS | SBS mode only (no audience AP). |
+
+**For the Listener AP** (audience phones), a USB adapter with an **external antenna** is recommended — it handles more concurrent clients and provides better range across a yard. The Pi's onboard BCM43455 (brcmfmac) is limited to ~10-15 clients and shares its radio with Bluetooth.
+
+**Recommended USB chipsets** (good Linux AP support):
+- **RTL8812AU** — dual-band 2.4/5 GHz, external antenna, excellent AP mode
+- **RT5370** — 2.4 GHz, compact, very reliable AP mode, well-supported on Pi
 
 ### QR Codes
 

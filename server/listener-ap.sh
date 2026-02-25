@@ -44,13 +44,14 @@ try:
     for iface, cfg in roles.items():
         if isinstance(cfg, str):
             # Old format - treat as SBS with defaults
-            print(f'{iface}|{cfg}|EAVESDROP|6|Listen123|192.168.50.1|24')
+            print(f'{iface}|{cfg}|EAVESDROP|6|Listen123|192.168.40.1|24')
         elif isinstance(cfg, dict):
             role = cfg.get('role', '')
             ssid = cfg.get('ssid', 'EAVESDROP')
             ch = cfg.get('channel', 6)
             pw = cfg.get('password', '')
-            ip = cfg.get('ip', '192.168.50.1')
+            default_ip = '192.168.40.1' if role == 'sbs' else '192.168.50.1'
+            ip = cfg.get('ip', default_ip)
             mask = cfg.get('mask', 24)
             print(f'{iface}|{role}|{ssid}|{ch}|{pw}|{ip}|{mask}')
 except Exception as e:

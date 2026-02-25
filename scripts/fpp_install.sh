@@ -186,7 +186,7 @@ if [ -f "$NETCONFIG" ] && [ ! -f "$NETCONFIG.listener-backup" ]; then
 fi
 sudo tee "$NETCONFIG" > /dev/null <<'PHPREDIRECT'
 <?php
-header('Location: plugin.php?plugin=fpp-eavesdrop&page=plugin.php');
+header('Location: plugin.php?plugin=SBSPlus&page=plugin.php');
 exit;
 PHPREDIRECT
 ok "Network page redirects to plugin dashboard"
@@ -214,23 +214,37 @@ if [ ! -f "$ROLES_FILE" ]; then
     for w in /sys/class/net/wlan*; do
       [ -d "$w" ] && DEFAULT_WLAN=$(basename "$w") && break
     done
-    if [ -n "$DEFAULT_WLAN" ]; then
-      sudo tee "$ROLES_FILE" > /dev/null <<EOF
-{
-    "$DEFAULT_WLAN": {
-        "role": "sbs",
-        "ssid": "EAVESDROP",
-        "channel": 6,
-        "password": "Listen123",
-        "ip": "192.168.50.1",
-        "mask": 24
+    # Build initial roles.json with detected interfaces
+    HAS_ETH0=""
+    [ -d "/sys/class/net/eth0" ] && HAS_ETH0="yes"
+
+    if [ -n "$DEFAULT_WLAN" ] || [ -n "$HAS_ETH0" ]; then
+      python3 -c "
+import json
+roles = {}
+wlan = '${DEFAULT_WLAN}'
+eth = '${HAS_ETH0}'
+if wlan:
+    roles[wlan] = {
+        'role': 'sbs',
+        'ssid': 'EAVESDROP',
+        'channel': 6,
+        'password': 'Listen123',
+        'ip': '192.168.40.1',
+        'mask': 24
     }
-}
-EOF
-      info "Default roles.json created (SBS on $DEFAULT_WLAN, password: Listen123)"
+if eth:
+    roles['eth0'] = {'role': 'show_network'}
+print(json.dumps(roles, indent=4))
+" | sudo tee "$ROLES_FILE" > /dev/null
+      if [ -n "$DEFAULT_WLAN" ]; then
+        info "Default roles.json created (SBS on $DEFAULT_WLAN, eth0: show_network)"
+      else
+        info "Default roles.json created (eth0: show_network)"
+      fi
     else
       echo '{}' | sudo tee "$ROLES_FILE" > /dev/null
-      warn "No wireless interface detected - empty roles.json created"
+      warn "No interfaces detected - empty roles.json created"
     fi
   fi
   sudo chmod 644 "$ROLES_FILE"
@@ -334,7 +348,7 @@ fi
 
 # --- Step 12: FPP Plugin registration ---
 info "Registering FPP plugin..."
-FPP_PLUGIN_DIR="/home/fpp/media/plugins/fpp-eavesdrop"
+FPP_PLUGIN_DIR="/home/fpp/media/plugins/SBSPlus"
 sudo mkdir -p "$FPP_PLUGIN_DIR"
 
 # Copy plugin system files (readlink guard prevents cp same-file error)
@@ -358,8 +372,8 @@ ok "FPP plugin registered"
 # --- Step 13: Add Undoc Admin footer button via custom.js ---
 CUSTOM_JS="/home/fpp/media/config/custom.js"
 # Remove any old injection first (clean slate)
-if [ -f "$CUSTOM_JS" ] && grep -q "fpp-eavesdrop" "$CUSTOM_JS" 2>/dev/null; then
-  sed -i '/-- fpp-eavesdrop/,/-- end fpp-eavesdrop --/d' "$CUSTOM_JS"
+if [ -f "$CUSTOM_JS" ] && grep -q "SBSPlus" "$CUSTOM_JS" 2>/dev/null; then
+  sed -i '/-- SBSPlus/,/-- end SBSPlus --/d' "$CUSTOM_JS"
   # Remove file if only whitespace remains
   if [ ! -s "$CUSTOM_JS" ] || ! grep -q '[^[:space:]]' "$CUSTOM_JS" 2>/dev/null; then
     rm -f "$CUSTOM_JS"
@@ -368,14 +382,14 @@ fi
 # Add footer button (appears on all FPP pages)
 touch "$CUSTOM_JS"
 cat >> "$CUSTOM_JS" <<'CUSTOMEOF'
-// -- fpp-eavesdrop -- Undoc Admin footer button
+// -- SBSPlus -- Undoc Admin footer button
 $(function(){
   var btn = $('<button type="button" class="buttons btn-outline-light">')
     .html('<i class="fas fa-fw fa-headphones fa-nbsp"></i>Undoc Admin')
     .on('click', function(){ window.open('/listen/admin.html','_blank'); });
   $('#rebootShutdown').prepend(btn);
 });
-// -- end fpp-eavesdrop --
+// -- end SBSPlus --
 CUSTOMEOF
 ok "Footer button configured"
 
@@ -444,6 +458,7 @@ else
 fi
 echo "========================================="
 echo "  FPP Dashboard: Status > SBS Audio Sync"
+echo "  Admin:  http://${LOCAL_IP}/listen/admin.html"
 echo "  Sync:   WebSocket (ws://${LOCAL_IP}/ws)"
 
 # Show configured interfaces from roles.json
@@ -457,9 +472,8 @@ try:
         role = cfg.get('role','')
         if role == 'sbs':
             ssid = cfg.get('ssid','EAVESDROP')
-            ip = cfg.get('ip','192.168.50.1')
+            ip = cfg.get('ip','192.168.40.1')
             print(f'  SBS AP:   {ssid} (WPA2) on {iface} ({ip})')
-            print(f'  Admin:  http://{ip}/listen/admin.html')
         elif role == 'listener':
             ssid = cfg.get('ssid','SHOW_AUDIO')
             ip = cfg.get('ip','192.168.50.1')

@@ -136,15 +136,15 @@ fi
 
 # --- Remove FPP plugin registration ---
 info "Removing FPP plugin..."
-if [ -d "/home/fpp/media/plugins/fpp-eavesdrop" ]; then
-  sudo rm -rf /home/fpp/media/plugins/fpp-eavesdrop
+if [ -d "/home/fpp/media/plugins/SBSPlus" ]; then
+  sudo rm -rf /home/fpp/media/plugins/SBSPlus
   ok "Plugin removed"
 fi
 
 # --- Remove old custom.js injection if present ---
 CUSTOM_JS="/home/fpp/media/config/custom.js"
-if [ -f "$CUSTOM_JS" ] && grep -q "fpp-eavesdrop" "$CUSTOM_JS" 2>/dev/null; then
-  sed -i '/-- fpp-eavesdrop/,/-- end fpp-eavesdrop --/d' "$CUSTOM_JS"
+if [ -f "$CUSTOM_JS" ] && grep -q "SBSPlus" "$CUSTOM_JS" 2>/dev/null; then
+  sed -i '/-- SBSPlus/,/-- end SBSPlus --/d' "$CUSTOM_JS"
   if [ ! -s "$CUSTOM_JS" ] || ! grep -q '[^[:space:]]' "$CUSTOM_JS" 2>/dev/null; then
     rm -f "$CUSTOM_JS"
   fi

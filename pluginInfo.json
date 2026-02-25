@@ -1,8 +1,8 @@
 {
-    "repoName": "fpp-eavesdrop",
+    "repoName": "SBSPlus",
     "name": "SBS with Audio Sync",
     "author": "Undocumented Engineer",
-    "description": "Streams synchronized audio to phones and browsers for Christmas light shows",
+    "description": "Turns your RPi with FPP into a Single Board Show (SBS) with WLED universe control, plus a phone listener that lets audiences connect and listen to synchronized show audio",
     "homeURL": "https://github.com/UndocEng/fpp-eavesdrop-sbs-plus",
     "srcURL": "https://github.com/UndocEng/fpp-eavesdrop-sbs-plus.git",
     "bugURL": "https://github.com/UndocEng/fpp-eavesdrop-sbs-plus/issues",
