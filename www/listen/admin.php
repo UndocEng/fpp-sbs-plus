@@ -61,7 +61,7 @@ switch ($action) {
 }
 
 
-// ── FPP Playback ────────────────────────────────────────────────────
+// -- FPP Playback ----------------------------------------------------
 
 function getPlaylists() {
   $ctx = stream_context_create(['http' => ['timeout' => 2.0]]);
@@ -119,7 +119,7 @@ function sendFPPCommand($cmd) {
 }
 
 
-// ── BT Calibration ──────────────────────────────────────────────────
+// -- BT Calibration --------------------------------------------------
 
 function getChannelOutputs() {
   $ctx = stream_context_create(['http' => ['timeout' => 2.0]]);
@@ -258,7 +258,7 @@ function cleanupCalFSEQ() {
 }
 
 
-// ── RPi Bluetooth ───────────────────────────────────────────────────
+// -- RPi Bluetooth ---------------------------------------------------
 
 function validateMAC($mac) {
   return preg_match('/^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/', $mac) === 1;

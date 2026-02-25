@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# fpp_install.sh — SBS with Audio Sync Plugin Install Script
+# fpp_install.sh - SBS with Audio Sync Plugin Install Script
 # =============================================================================
 # Called by FPP's plugin manager after cloning, or manually via:
 #   sudo ./scripts/fpp_install.sh
@@ -133,10 +133,28 @@ if [ -f "$FPP_VHOST" ] && grep -q 'show-rewrite.conf' "$FPP_VHOST" 2>/dev/null; 
   sudo sed -i '/show-rewrite\.conf/d' "$FPP_VHOST"
   info "Removed old VirtualHost injection (now in conf-enabled)"
 fi
-# Restore AllowOverride backup if it exists (no longer needed)
-if [ -f "/etc/apache2/sites-enabled/000-default.conf.listener-backup" ]; then
-  sudo mv "/etc/apache2/sites-enabled/000-default.conf.listener-backup" \
-          "/etc/apache2/sites-enabled/000-default.conf" 2>/dev/null || true
+# Remove old AllowOverride backup (no longer needed - we don't modify 000-default.conf).
+# IMPORTANT: Do NOT restore the backup - it replaces the sites-enabled symlink with a
+# stale file copy, breaking FPP's Apache config when FPP updates sites-available.
+sudo rm -f "/etc/apache2/sites-enabled/000-default.conf.listener-backup" 2>/dev/null || true
+# Ensure sites-enabled is a symlink (not a stale file from old backup restore)
+if [ -f "/etc/apache2/sites-enabled/000-default.conf" ] && [ ! -L "/etc/apache2/sites-enabled/000-default.conf" ]; then
+  sudo rm "/etc/apache2/sites-enabled/000-default.conf"
+  sudo ln -s /etc/apache2/sites-available/000-default.conf /etc/apache2/sites-enabled/000-default.conf
+  info "Restored 000-default.conf symlink"
+fi
+
+# Clean up old fpp-listener-sync wlan1-setup.service if present
+# The old plugin created a service that hardcoded 192.168.50.1 on wlan1 at boot,
+# conflicting with our per-interface IP management in listener-ap.sh.
+if [ -f /etc/systemd/system/wlan1-setup.service ]; then
+  info "Removing old wlan1-setup service..."
+  sudo systemctl stop wlan1-setup 2>/dev/null || true
+  sudo systemctl disable wlan1-setup 2>/dev/null || true
+  sudo rm -f /etc/systemd/system/wlan1-setup.service
+  sudo rm -f /usr/local/bin/wlan1-setup.sh
+  sudo systemctl daemon-reload
+  ok "Old wlan1-setup service removed"
 fi
 
 # Clean up old fpp-listener-sync dnsmasq config if present
@@ -146,9 +164,9 @@ if grep -q 'SHOW_AUDIO\|listen-sync\|listener' /etc/dnsmasq.conf 2>/dev/null; th
   info "Cleaning old fpp-listener-sync dnsmasq config..."
   sudo systemctl stop dnsmasq 2>/dev/null || true
   sudo systemctl disable dnsmasq 2>/dev/null || true
-  # Reset to minimal default (dnsmasq service stays disabled — we use per-interface instances)
+  # Reset to minimal default (dnsmasq service stays disabled - we use per-interface instances)
   sudo tee /etc/dnsmasq.conf > /dev/null <<'DNSEOF'
-# Default dnsmasq.conf — system dnsmasq disabled.
+# Default dnsmasq.conf - system dnsmasq disabled.
 # Per-interface DNS/DHCP is managed by SBS with Audio Sync plugin.
 DNSEOF
   ok "Old dnsmasq config cleaned"
@@ -187,11 +205,11 @@ sudo chown fpp:fpp "$LISTEN_SYNC"
 ROLES_FILE="$LISTEN_SYNC/roles.json"
 if [ ! -f "$ROLES_FILE" ]; then
   if [ -f "$LISTEN_SYNC/ap.conf" ]; then
-    # Migrate from legacy ap.conf — dashboard will complete migration on first load
-    info "Legacy ap.conf found — will migrate on first dashboard access"
+    # Migrate from legacy ap.conf - dashboard will complete migration on first load
+    info "Legacy ap.conf found - will migrate on first dashboard access"
     echo '{}' | sudo tee "$ROLES_FILE" > /dev/null
   else
-    # Fresh install — detect first wireless interface and assign SBS role
+    # Fresh install - detect first wireless interface and assign SBS role
     DEFAULT_WLAN=""
     for w in /sys/class/net/wlan*; do
       [ -d "$w" ] && DEFAULT_WLAN=$(basename "$w") && break
@@ -212,7 +230,7 @@ EOF
       info "Default roles.json created (SBS on $DEFAULT_WLAN, password: Listen123)"
     else
       echo '{}' | sudo tee "$ROLES_FILE" > /dev/null
-      warn "No wireless interface detected — empty roles.json created"
+      warn "No wireless interface detected - empty roles.json created"
     fi
   fi
   sudo chmod 644 "$ROLES_FILE"
@@ -274,7 +292,7 @@ if [ -f "$PLUGIN_DIR/server/listener-ap.service" ]; then
     sudo systemctl restart listener-ap 2>/dev/null || true
     ok "listener-ap service started ($WLAN_IF detected)"
   else
-    warn "$WLAN_IF not detected — listener-ap enabled but not started"
+    warn "$WLAN_IF not detected - listener-ap enabled but not started"
     info "Connect $WLAN_IF and run: sudo systemctl start listener-ap"
   fi
 fi
@@ -283,7 +301,7 @@ fi
 info "Configuring sudoers..."
 SUDOERS_FILE="/etc/sudoers.d/listener-sync"
 sudo tee "$SUDOERS_FILE" > /dev/null <<'EOF'
-# SBS with Audio Sync — allow www-data to manage services and config
+# SBS with Audio Sync - allow www-data to manage services and config
 www-data ALL=(ALL) NOPASSWD: /usr/bin/tee /home/fpp/listen-sync/hostapd-*
 www-data ALL=(ALL) NOPASSWD: /usr/bin/tee /home/fpp/listen-sync/roles.json
 www-data ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/dnsmasq.conf
@@ -311,7 +329,7 @@ sudo chmod 440 "$SUDOERS_FILE"
 if sudo visudo -cf "$SUDOERS_FILE" >/dev/null 2>&1; then
   ok "Sudoers configured"
 else
-  warn "Sudoers syntax check failed — admin API may not work"
+  warn "Sudoers syntax check failed - admin API may not work"
 fi
 
 # --- Step 12: FPP Plugin registration ---
@@ -337,17 +355,29 @@ fi
 sudo chown -R fpp:fpp "$FPP_PLUGIN_DIR"
 ok "FPP plugin registered"
 
-# --- Step 13: Remove old custom.js injection (replaced by plugin system) ---
+# --- Step 13: Add Undoc Admin footer button via custom.js ---
 CUSTOM_JS="/home/fpp/media/config/custom.js"
+# Remove any old injection first (clean slate)
 if [ -f "$CUSTOM_JS" ] && grep -q "fpp-eavesdrop" "$CUSTOM_JS" 2>/dev/null; then
-  info "Removing old custom.js footer button (replaced by plugin system)..."
   sed -i '/-- fpp-eavesdrop/,/-- end fpp-eavesdrop --/d' "$CUSTOM_JS"
   # Remove file if only whitespace remains
   if [ ! -s "$CUSTOM_JS" ] || ! grep -q '[^[:space:]]' "$CUSTOM_JS" 2>/dev/null; then
     rm -f "$CUSTOM_JS"
   fi
-  ok "Old custom.js injection removed"
 fi
+# Add footer button (appears on all FPP pages)
+touch "$CUSTOM_JS"
+cat >> "$CUSTOM_JS" <<'CUSTOMEOF'
+// -- fpp-eavesdrop -- Undoc Admin footer button
+$(function(){
+  var btn = $('<button type="button" class="buttons btn-outline-light">')
+    .html('<i class="fas fa-fw fa-headphones fa-nbsp"></i>Undoc Admin')
+    .on('click', function(){ window.open('/listen/admin.html','_blank'); });
+  $('#rebootShutdown').prepend(btn);
+});
+// -- end fpp-eavesdrop --
+CUSTOMEOF
+ok "Footer button configured"
 
 # --- Step 14: Fix git .git/ ownership ---
 if [ -d "$PLUGIN_DIR/.git" ]; then
@@ -432,7 +462,7 @@ try:
             print(f'  Admin:  http://{ip}/listen/admin.html')
         elif role == 'listener':
             ssid = cfg.get('ssid','SHOW_AUDIO')
-            ip = cfg.get('ip','192.168.60.1')
+            ip = cfg.get('ip','192.168.50.1')
             pw = cfg.get('password','')
             sec = 'WPA2' if pw else 'open'
             print(f'  Listen:   {ssid} ({sec}) on {iface} ({ip})')

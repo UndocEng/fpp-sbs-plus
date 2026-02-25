@@ -1,11 +1,11 @@
 /* =============================================================================
- * dashboard.css — Eavesdrop Network Dashboard
+ * dashboard.css - Eavesdrop Network Dashboard
  * =============================================================================
  * Minimal overrides for the card-based network config page.
  * FPP's Bootstrap 5 dark theme handles most styling.
  * ============================================================================= */
 
-/* Interface card grid — don't stretch shorter cards to match taller neighbors */
+/* Interface card grid - don't stretch shorter cards to match taller neighbors */
 #interface-cards {
     align-items: flex-start;
 }
@@ -84,7 +84,7 @@ code {
     margin-bottom: 2px;
 }
 
-/* Fix alert contrast in FPP's dark theme — force dark text on light backgrounds */
+/* Fix alert contrast in FPP's dark theme - force dark text on light backgrounds */
 .iface-card .alert-info {
     background: #1b4d5c;
     border-color: #2a6a7a;

@@ -1,11 +1,11 @@
 # =============================================================================
-# .htaccess-show — Captive Portal + Security Whitelist for SBS+ Show AP
+# .htaccess-show - Captive Portal + Security Whitelist for SBS+ Show AP
 # =============================================================================
 #
 # Template deployed by listener-ap.sh with placeholder substitution:
-#   __SHOW_AP_IP__        → Show AP IP (e.g., 192.168.60.1)
-#   __SHOW_SUBNET_ESC__   → Escaped subnet prefix (e.g., 192\.168\.60\.)
-#   __SHOW_SUBNET_OCTET__ → Third octet (e.g., 60) for admin subnet exclusion
+#   __SHOW_AP_IP__        → Show AP IP (e.g., 192.168.50.1)
+#   __SHOW_SUBNET_ESC__   → Escaped subnet prefix (e.g., 192\.168\.50\.)
+#   __SHOW_SUBNET_OCTET__ → Third octet (e.g., 50) for admin subnet exclusion
 #
 # Deployed to: /opt/fpp/www/.htaccess when SBS+ show AP is enabled
 # Removed when show AP is disabled or service stops
@@ -50,7 +50,7 @@
     RewriteRule ^ http://__SHOW_AP_IP__/listen/listen.html [R=302,L]
 
     # --- Rules 2a-d: Whitelist allowed paths from show network ---
-    # These rules use [L] (Last) to stop processing — the request passes through
+    # These rules use [L] (Last) to stop processing - the request passes through
     # to the actual file/directory without any redirect.
 
     # 2a. Allow specific public files under /listen/
@@ -65,7 +65,7 @@
     RewriteCond %{REQUEST_URI} ^/music(/|$) [NC]
     RewriteRule ^ - [L]
 
-    # 2c. Allow /ws (WebSocket proxy — Apache routes this to ws-sync on port 8080)
+    # 2c. Allow /ws (WebSocket proxy - Apache routes this to ws-sync on port 8080)
     RewriteCond %{REMOTE_ADDR} ^__SHOW_SUBNET_ESC__
     RewriteCond %{REQUEST_URI} ^/ws$ [NC]
     RewriteRule ^ - [L]
@@ -86,5 +86,5 @@
 
     # --- Rule 4: All other sources pass through ---
     # Eavesdrop AP clients, localhost, eth0, fpp.local get full FPP access.
-    # No rule needed — requests that don't match the show subnet proceed normally.
+    # No rule needed - requests that don't match the show subnet proceed normally.
 </IfModule>

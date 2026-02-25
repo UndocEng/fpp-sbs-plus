@@ -134,7 +134,7 @@
 <script>
 
 // =============================================================================
-// FPP LISTENER SYNC CLIENT — Adaptive PLL Audio Synchronization
+// FPP LISTENER SYNC CLIENT - Adaptive PLL Audio Synchronization
 // =============================================================================
 //
 // WHAT THIS DOES:
@@ -154,19 +154,19 @@
 //      the phone and Pi. From RTT we estimate a clock offset so we know the
 //      exact relationship between the phone's Date.now() and the Pi's clock.
 //      This offset is critical because the FPP position timestamp was captured
-//      on the Pi — we need to know "how stale is this position?" in phone time.
+//      on the Pi - we need to know "how stale is this position?" in phone time.
 //
-//   3. TARGET CALCULATION: For each incoming message, we compute targetMs —
-//      where the audio *should* be right now — by taking the FPP position and
+//   3. TARGET CALCULATION: For each incoming message, we compute targetMs -
+//      where the audio *should* be right now - by taking the FPP position and
 //      adding elapsed time since the Pi captured it (compensated by clock offset).
 //
 //   4. IMMEDIATE START: When a new track begins, we seek directly to the target
-//      position and call play(). No waiting — the PLL will converge from there.
+//      position and call play(). No waiting - the PLL will converge from there.
 //
 //   5. PLL SYNC (Phase-Locked Loop):
 //      After a short settle period, we enter a 3-phase PLL:
 //        a) CALIBRATE: Collect (localMs, fppMs) sample pairs for 800ms+,
-//           compute a least-squares regression slope → baseRate. This tells
+//           compute a least-squares regression slope -> baseRate. This tells
 //           us the native clock relationship (usually ~1.0000).
 //        b) LOCK: Use an adaptive proportional controller to adjust
 //           audio.playbackRate. The error input is a 2-second rolling average
@@ -181,7 +181,7 @@
 // WHY A PLL?
 //   Simple "check every 5 seconds and seek if off" causes audible glitches
 //   because MP3 seeking has ~500ms keyframe granularity. The PLL smoothly
-//   adjusts playback speed by tiny amounts (±0.1–5%), which is inaudible
+//   adjusts playback speed by tiny amounts (+/-0.1-5%), which is inaudible
 //   and converges to <25ms error in 12-14 seconds.
 //
 // =============================================================================
@@ -229,15 +229,15 @@ btSlider.addEventListener('input',function(){
 
 // --- Global State ---
 // enabled: user tapped "Enable Audio" (required for mobile autoplay policy)
-// currentBase: filename (no extension) of the currently loaded track — used to detect track changes
+// currentBase: filename (no extension) of the currently loaded track - used to detect track changes
 // haveMetadata: true once the <audio> element has loaded the track's metadata (duration, etc.)
 // needInitialSeek: flag set on track change; cleared after the first seek+play
 // lastSeekMs: timestamp of last hard seek (for cooldown enforcement)
 // settleUntil: timestamp until which we suppress PLL corrections (lets audio stabilize after play/seek)
-// syncBusy: reentrance guard — prevents overlapping sync() calls from WebSocket + HTTP simultaneously
+// syncBusy: reentrance guard - prevents overlapping sync() calls from WebSocket + HTTP simultaneously
 let enabled=false, currentBase="", pollTimer=null, haveMetadata=false, needInitialSeek=false, lastSeekMs=0, settleUntil=0, syncBusy=false;
 // logFrozen: when a song ends, we freeze the client log so the user can review it
-// wasPlaying: tracks play→stop transition to avoid sending STOP reports every 100ms
+// wasPlaying: tracks play->stop transition to avoid sending STOP reports every 100ms
 let logFrozen=false, wasPlaying=false;
 // pendingMsg: latest unprocessed message (if sync is busy, we queue the newest and drop older ones)
 // playAttempting: guard to prevent multiple simultaneous play() calls
@@ -285,24 +285,24 @@ let errHistoryAll=[];            // all error samples since track start (for avg
 let errHistory2s=[];             // timestamped error samples within the last 2 seconds: [{t, err}]
 
 // --- PLL (Phase-Locked Loop) Constants ---
-// These control the sync algorithm's behavior. Tuned over many iterations (v2.2.0–v2.2.18).
+// These control the sync algorithm's behavior. Tuned over many iterations (v2.2.0-v2.2.18).
 //
 // CAL_MIN_MS: During calibration phase, we need at least this many ms of sample data
-//   to compute a reliable least-squares slope for baseRate. Too short → noisy slope.
+//   to compute a reliable least-squares slope for baseRate. Too short -> noisy slope.
 const CAL_MIN_MS=800;
 //
 // Kp_BASE / Kp_SCALE: Adaptive proportional gain for the PLL locked phase.
-//   When error is small, Kp ≈ Kp_BASE (gentle). When error is large (approaching 200ms),
+//   When error is small, Kp ~= Kp_BASE (gentle). When error is large (approaching 200ms),
 //   Kp grows up to Kp_BASE * (1 + Kp_SCALE) = 0.05 (aggressive).
 //   Formula: Kp = Kp_BASE * (1 + Kp_SCALE * min(|avg2s| / 200, 1))
 const Kp_BASE=0.01;
 const Kp_SCALE=4;
 //
 // MAX_ADJ: Hard clamp on playbackRate deviation from 1.0. Prevents extreme speeds
-//   that would be audible. ±5% means rate stays in [0.95, 1.05].
+//   that would be audible. +/-5% means rate stays in [0.95, 1.05].
 const MAX_ADJ=0.05;
 //
-// DEAD_ZONE_MS: If avg2s error is within ±5ms, don't adjust rate. Prevents micro-jitter
+// DEAD_ZONE_MS: If avg2s error is within +/-5ms, don't adjust rate. Prevents micro-jitter
 //   corrections that are below the threshold of perception anyway.
 const DEAD_ZONE_MS=5;
 //
@@ -334,7 +334,7 @@ const JUMP_COLLECT_MS=1000;
 const JUMP_THRESHOLD_MS=200;
 
 // --- PLL State Machine ---
-// phase: 'idle' → 'calibrating' → 'locked'. Resets to 'idle' on track change/stop.
+// phase: 'idle' -> 'calibrating' -> 'locked'. Resets to 'idle' on track change/stop.
 // samples: array of {localMs, fppMs} during calibration for least-squares regression
 // baseRate: the "natural" clock ratio between phone and FPP (usually ~1.0000)
 // anchorLocalMs/anchorFppMs: reference point for measuring rate drift in locked phase
@@ -383,7 +383,7 @@ function pllReset(){
 // Least-squares linear regression: computes slope of fppMs vs localMs.
 // Returns ms of FPP time per ms of local time (i.e., the relative clock speed).
 // A slope of 1.0001 means "FPP clock runs 0.01% faster than phone clock."
-// We use this during calibration to determine baseRate — the playbackRate that
+// We use this during calibration to determine baseRate - the playbackRate that
 // would keep the phone exactly in sync if there were no initial offset.
 function linearSlope(samples){
   if(samples.length<2)return 1.0;
@@ -426,15 +426,15 @@ function log(msg){
 // --- Server-Side Reporting ---
 // Sends sync telemetry back to the Pi via WebSocket, where it's logged to
 // /home/fpp/listen-sync/sync.log. Only active when "Server Log" checkbox is
-// checked (off by default to minimize overhead — each report is a WS send + disk write).
+// checked (off by default to minimize overhead - each report is a WS send + disk write).
 //
 // Events:
-//   TRACK          — new track detected
-//   INITIAL_SEEK   — first seek after track load
-//   START          — play() called
-//   SYNC           — periodic heartbeat (throttled to 1/sec)
-//   CORRECTION     — hard seek correction
-//   STOP           — track ended / FPP stopped
+//   TRACK          - new track detected
+//   INITIAL_SEEK   - first seek after track load
+//   START          - play() called
+//   SYNC           - periodic heartbeat (throttled to 1/sec)
+//   CORRECTION     - hard seek correction
+//   STOP           - track ended / FPP stopped
 const REPORT_INTERVAL_MS=1000;   // throttle periodic SYNC reports to 1/sec
 let lastReportMs=0;
 let lastRawPosMs=0, lastTargetMs=0, lastLocalMs=0;  // cached for report payload
@@ -452,9 +452,9 @@ function sendReport(event,errMs,rate){
     type:'report',
     event:event,
     fpp:Math.round(lastRawPosMs),       // raw position from FPP API (ms)
-    target:Math.round(lastTargetMs),     // computed target position (ms) — FPP + elapsed
+    target:Math.round(lastTargetMs),     // computed target position (ms) - FPP + elapsed
     local:Math.round(lastLocalMs),       // audio.currentTime * 1000 (ms)
-    err:Math.round(errMs||0),            // target - local (ms) — positive = behind
+    err:Math.round(errMs||0),            // target - local (ms) - positive = behind
     rate:Number((rate||1.0).toFixed(4)), // current playbackRate
     eff:Number((lastEffRate||0).toFixed(3)),  // measured effective rate
     offset:Math.round(clockOffset),      // estimated clock offset (ms)
@@ -511,11 +511,11 @@ function updateClockOffset(serverTs, clientSendTs, rtt){
   const median=sorted[Math.floor(sorted.length/2)];
 
   if(!clockOffsetValid){
-    // First valid estimate — accept it immediately (no prior to smooth against)
+    // First valid estimate - accept it immediately (no prior to smooth against)
     clockOffset=median;
     clockOffsetValid=true;
   }else{
-    // EWMA smoothing: 70% prior + 30% new median — prevents jumps
+    // EWMA smoothing: 70% prior + 30% new median - prevents jumps
     clockOffset=clockOffset*0.7+median*0.3;
   }
   offsetEl.textContent=Math.round(clockOffset);
@@ -541,7 +541,7 @@ function connectWebSocket(){
   ws.onopen=()=>{
     wsConnected=true;
     stopHttpPolling();  // WS is better than HTTP; stop polling
-    // Reset clock offset — the WS connection may be to a different server instance
+    // Reset clock offset - the WS connection may be to a different server instance
     // or the network path may have changed. Fresh calibration is safer.
     offsetHistory=[];
     clockOffsetValid=false;
@@ -578,7 +578,7 @@ function connectWebSocket(){
     if(wsPingTimer){clearInterval(wsPingTimer);wsPingTimer=null;}
     pollEl.textContent='WS disconnected, HTTP fallback';
     startHttpFallback();  // switch to HTTP polling immediately
-    // Schedule a reconnect attempt — WS will take over again on success
+    // Schedule a reconnect attempt - WS will take over again on success
     if(wsReconnectTimer)clearTimeout(wsReconnectTimer);
     wsReconnectTimer=setTimeout(connectWebSocket,WS_RECONNECT_MS);
   };
@@ -594,7 +594,7 @@ function sendPing(){
 }
 
 // Process a pong (clock-sync response from server).
-// Reject samples with extreme RTT (>500ms) — they'd give a bad offset estimate.
+// Reject samples with extreme RTT (>500ms) - they'd give a bad offset estimate.
 function handlePong(data){
   const now=Date.now();
   const clientTs=data.client_ts;   // our original timestamp, echoed back
@@ -608,7 +608,7 @@ function handlePong(data){
     updateClockOffset(serverTs,clientTs,rtt);
     log('PONG rtt='+rtt+'ms offset='+Math.round(clockOffset)+'ms');
   }else{
-    // RTT too high — network was congested, skip this sample
+    // RTT too high - network was congested, skip this sample
     log('PONG REJECTED rtt='+rtt+'ms (out of range)');
   }
 }
@@ -666,7 +666,7 @@ async function pollOnce(){
 // AUDIO PLAYBACK HELPERS
 // =============================================================================
 
-// Safely call audio.play() — wraps the promise to catch autoplay rejections.
+// Safely call audio.play() - wraps the promise to catch autoplay rejections.
 // Mobile browsers block play() unless it originates from a user gesture (tap).
 // That's why we require the "Enable Audio" button tap first.
 async function safePlay(){
@@ -693,7 +693,7 @@ enableBtn.onclick=()=>{
   enableBtn.textContent='Audio Enabled';
   pollEl.textContent='Connecting...';
 
-  // Start both transports — WS will shut down HTTP polling if it connects
+  // Start both transports - WS will shut down HTTP polling if it connects
   connectWebSocket();
   startHttpFallback();
 
@@ -741,7 +741,7 @@ function beginScheduledStart(targetSec){
 }
 
 // =============================================================================
-// SYNC ALGORITHM — The core of the system
+// SYNC ALGORITHM - The core of the system
 // =============================================================================
 //
 // Called every time we receive a state update from the server (~100ms via WS,
@@ -867,7 +867,7 @@ async function syncInner(msg){
   const rawPosMs=Number(msg.pos_ms||0);
 
   let targetMs=rawPosMs;
-  // Use clock offset for serverOk check when available (Pi may have wrong clock — no RTC/NTP)
+  // Use clock offset for serverOk check when available (Pi may have wrong clock - no RTC/NTP)
   const timeDiff=clockOffsetValid?Math.abs((nowMs+clockOffset)-serverMs):Math.abs(nowMs-serverMs);
   const serverOk=Number.isFinite(serverMs)&&serverMs>1e12&&timeDiff<300000;
   if(serverOk){
@@ -876,7 +876,7 @@ async function syncInner(msg){
       // Offset-corrected: convert phone time to server time, find delta
       elapsed=(nowMs+clockOffset)-serverMs;
     }else{
-      // No offset yet — assume clocks are close enough (best effort)
+      // No offset yet - assume clocks are close enough (best effort)
       elapsed=nowMs-serverMs;
     }
     if(!Number.isFinite(elapsed))elapsed=0;
@@ -924,7 +924,7 @@ async function syncInner(msg){
   }
 
   // =========================================================================
-  // IMMEDIATE START — First sync tick after track loads
+  // IMMEDIATE START - First sync tick after track loads
   // =========================================================================
   // Strategy: seek directly to where FPP is now and press play immediately.
   // The PLL will converge from whatever initial error this produces.
@@ -967,7 +967,7 @@ async function syncInner(msg){
   //   1. Measure play() startup latency (how long until audio.currentTime moves)
   //   2. Collect PLL calibration samples (localMs, fppMs pairs for regression)
   //
-  // No rate corrections happen during settle — the audio is stabilizing and
+  // No rate corrections happen during settle - the audio is stabilizing and
   // the error measurements would be noisy. When settle ends, the PLL has
   // enough samples to compute baseRate and can transition to locked immediately.
   if(nowMs<settleUntil){
@@ -1029,7 +1029,7 @@ async function syncInner(msg){
         // Seek ahead by play latency to compensate for audio pipeline rebuffer time
         const leadSec=(playLatencyMs>0?playLatencyMs:500)/1000;
         const seekTo=clamp(targetSec+leadSec,0,Math.max(0,audio.duration-0.1));
-        log('JUMP CHECK: avg='+Math.round(avgErr)+'ms > '+JUMP_THRESHOLD_MS+'ms — seeking to target+'+Math.round(leadSec*1000)+'ms');
+        log('JUMP CHECK: avg='+Math.round(avgErr)+'ms > '+JUMP_THRESHOLD_MS+'ms - seeking to target+'+Math.round(leadSec*1000)+'ms');
         sendReport('CORRECTION',avgErr,1.0);
         audio.currentTime=seekTo;
         audio.playbackRate=1.0;
@@ -1038,14 +1038,14 @@ async function syncInner(msg){
         errHistoryAll=[];errHistory2s=[];
         pll.phase='idle';pll.samples=[];
       }else{
-        log('JUMP CHECK: avg='+Math.round(avgErr)+'ms < '+JUMP_THRESHOLD_MS+'ms — no jump needed');
+        log('JUMP CHECK: avg='+Math.round(avgErr)+'ms < '+JUMP_THRESHOLD_MS+'ms - no jump needed');
       }
     }
     return;
   }
 
   // =========================================================================
-  // NORMAL OPERATION — PLL Sync
+  // NORMAL OPERATION - PLL Sync
   // =========================================================================
   errEl.textContent=Math.round(errMs);
 
@@ -1059,7 +1059,7 @@ async function syncInner(msg){
   // errHistory2s: time-windowed 2-second rolling average.
   // THIS IS THE PLL'S ERROR INPUT (not instantaneous error).
   // Why avg2s instead of instantaneous?
-  //   - Instantaneous error is noisy (±80ms) due to network jitter and
+  //   - Instantaneous error is noisy (+/-80ms) due to network jitter and
   //     FPP's ~100ms poll interval. Using it directly causes the PLL to
   //     overcorrect and oscillate.
   //   - avg2s is smooth and stable, giving the PLL a clean signal.
@@ -1104,7 +1104,7 @@ async function syncInner(msg){
   const fppMs=targetMs;
 
   // =========================================================================
-  // PLL PHASE 1: IDLE → Start Calibrating
+  // PLL PHASE 1: IDLE -> Start Calibrating
   // =========================================================================
   // First tick after settle ends (or after a re-calibration). Begin collecting
   // (localMs, fppMs) sample pairs for least-squares regression.
@@ -1120,12 +1120,12 @@ async function syncInner(msg){
   }
 
   // =========================================================================
-  // PLL PHASE 2: CALIBRATING — Determine baseRate via least-squares regression
+  // PLL PHASE 2: CALIBRATING - Determine baseRate via least-squares regression
   // =========================================================================
   // Collect samples for at least CAL_MIN_MS (800ms) with at least 6 data points.
-  // Then compute the slope of fppMs vs localMs — this tells us the relative
+  // Then compute the slope of fppMs vs localMs - this tells us the relative
   // clock speed between the phone and FPP. A slope of 1.0002 means "for every
-  // 1000ms of phone time, FPP advances 1000.2ms" — the phone needs to play
+  // 1000ms of phone time, FPP advances 1000.2ms" - the phone needs to play
   // at 1.0002x speed to keep up.
   //
   // The clamp to [0.99, 1.01] rejects garbage slopes that can occur if the
@@ -1139,8 +1139,8 @@ async function syncInner(msg){
 
     if(calSpanMs>=CAL_MIN_MS&&pll.samples.length>=6){
       pll.baseRate=linearSlope(pll.samples);
-      // Clamp: reject slopes beyond ±1%. Real clock drift is typically <0.01%.
-      // Bad slopes come from noisy data during the settle→calibrate transition.
+      // Clamp: reject slopes beyond +/-1%. Real clock drift is typically <0.01%.
+      // Bad slopes come from noisy data during the settle->calibrate transition.
       if(pll.baseRate<0.99||pll.baseRate>1.01)pll.baseRate=1.0;
       pll.phase='locked';
       // IMPORTANT: No snap-seek at lock time.
@@ -1158,13 +1158,13 @@ async function syncInner(msg){
   }
 
   // =========================================================================
-  // PLL PHASE 3: LOCKED — Continuous adaptive rate correction
+  // PLL PHASE 3: LOCKED - Continuous adaptive rate correction
   // =========================================================================
   // This is where the magic happens. We continuously adjust audio.playbackRate
   // to keep the phone in sync with FPP.
   //
   // The correction signal uses avg2s (2-second rolling average error) as input,
-  // not the instantaneous error. This is critical for stability — see note above.
+  // not the instantaneous error. This is critical for stability - see note above.
   const phaseErr=targetSec-localSec;
   pllStateEl.textContent='locked';
 
@@ -1192,9 +1192,9 @@ async function syncInner(msg){
   // --- Adaptive Proportional Controller ---
   //
   // Kp (gain) scales with error magnitude:
-  //   Small error (<5ms):   Kp ≈ 0.01 (gentle, no overshoot)
-  //   Medium error (~100ms): Kp ≈ 0.03 (moderate correction)
-  //   Large error (~200ms+): Kp ≈ 0.05 (aggressive, converge fast)
+  //   Small error (<5ms):   Kp ~= 0.01 (gentle, no overshoot)
+  //   Medium error (~100ms): Kp ~= 0.03 (moderate correction)
+  //   Large error (~200ms+): Kp ~= 0.05 (aggressive, converge fast)
   //
   // rateInterval controls how often we update playbackRate:
   //   Large error (>50ms): every 500ms (faster convergence)
@@ -1216,9 +1216,9 @@ async function syncInner(msg){
       // Outside dead zone: apply log-compressed correction
       rate=pll.baseRate+Math.sign(lastAvg2s)*Kp*Math.log1p((absAvg2s-DEAD_ZONE_MS)/LOG_SCALE_MS);
     }
-    // Hard clamp to ±5% — prevents inaudible but technically extreme rates
+    // Hard clamp to +/-5% - prevents inaudible but technically extreme rates
     rate=clamp(rate,1-MAX_ADJ,1+MAX_ADJ);
-    // Only update if change exceeds threshold — avoids unnecessary API calls
+    // Only update if change exceeds threshold - avoids unnecessary API calls
     // that can cause micro-stutters on some mobile browsers
     if(Math.abs(rate-audio.playbackRate)>MIN_RATE_CHANGE){
       audio.playbackRate=rate;
@@ -1235,7 +1235,7 @@ async function syncInner(msg){
   if(dtLocal>2000){
     const dtFpp=fppMs-pll.anchorFppMs;
     const instRate=dtFpp/dtLocal;
-    // Only update if the measured rate is plausible (within ±5%)
+    // Only update if the measured rate is plausible (within +/-5%)
     if(instRate>0.95&&instRate<1.05){
       pll.baseRate=pll.baseRate*(1-RATE_EMA)+instRate*RATE_EMA;
     }
@@ -1247,7 +1247,7 @@ async function syncInner(msg){
   // Periodic server-side reporting
   sendReport('SYNC',errMs,audio.playbackRate);
 
-  // Periodic client-side logging (every 20th tick ≈ every 2 seconds)
+  // Periodic client-side logging (every 20th tick ~= every 2 seconds)
   if(++logThrottle%20===0)log('PLL err='+Math.round(phaseErr*1000)+'ms rate='+audio.playbackRate.toFixed(3)+'x base='+pll.baseRate.toFixed(4));
 }
 

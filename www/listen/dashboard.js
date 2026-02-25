@@ -1,10 +1,10 @@
 // =============================================================================
-// dashboard.js — Eavesdrop Network Dashboard
+// dashboard.js - Eavesdrop Network Dashboard
 // =============================================================================
 // Card-based network configuration. Each interface gets a card with a
 // configurable role:
-//   SBS:          Single Board Show — Pi creates admin AP for WLED/show devices
-//   Listener:     Listener AP — isolated public AP with captive portal
+//   SBS:          Single Board Show - Pi creates admin AP for WLED/show devices
+//   Listener:     Listener AP - isolated public AP with captive portal
 //   Show Network: Pi joins existing WiFi (client mode via wpa_supplicant)
 //   Unused:       Interface disabled
 //
@@ -343,7 +343,7 @@ function buildShowNetworkSettings(iface, fppData) {
     html += '<div class="alert alert-info py-2 mb-3" style="font-size:0.85em;">';
     html += '<i class="fas fa-wifi me-1"></i> <strong>Show Network.</strong> ';
     html += 'Joins an existing WiFi network (venue network, show controller, etc.). ';
-    html += 'The Pi connects as a client — no access point is created on this interface.';
+    html += 'The Pi connects as a client - no access point is created on this interface.';
     html += '</div>';
 
     html += '<div class="mb-2"><small class="text-muted">Current IP: <strong>' + currentIP + '</strong></small></div>';
@@ -384,7 +384,7 @@ function buildShowNetworkSettings(iface, fppData) {
     html += inputRow(iface.name, 'gateway', 'Gateway', gw, 'e.g. 192.168.1.1');
     html += '</div>';
 
-    // Tethering section (only for Show Network — NOT for SBS)
+    // Tethering section (only for Show Network - NOT for SBS)
     html += buildTetherSection(iface);
 
     // Save button
@@ -759,7 +759,7 @@ $(document).ready(function() {
         wifiScan(iface);
     });
 
-    // Scan result click — fill SSID
+    // Scan result click - fill SSID
     $(document).on('click', '.scan-result-item', function(e) {
         e.preventDefault();
         var ssid = $(this).data('ssid');

@@ -1,12 +1,12 @@
 #!/bin/bash
 # =============================================================================
-# fpp_uninstall.sh — SBS with Audio Sync Plugin Uninstall Script
+# fpp_uninstall.sh - SBS with Audio Sync Plugin Uninstall Script
 # =============================================================================
 # Called by FPP's plugin manager before removing the plugin, or manually via:
 #   sudo ./scripts/fpp_uninstall.sh
 #
 # Reverses everything fpp_install.sh did. FPP's network settings
-# (/home/fpp/media/config/interface.*) are NOT touched — they survive uninstall.
+# (/home/fpp/media/config/interface.*) are NOT touched - they survive uninstall.
 # =============================================================================
 
 set -e
