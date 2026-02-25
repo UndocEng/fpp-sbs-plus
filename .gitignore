@@ -1,0 +1,2 @@
+# Claude Code local settings (contains SSH keys, passwords, IPs)
+.claude/
