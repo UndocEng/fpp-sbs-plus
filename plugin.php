@@ -1,6 +1,6 @@
 <?php
 // =============================================================================
-// plugin.php — Eavesdrop Network Dashboard
+// plugin.php - Eavesdrop Network Dashboard
 // =============================================================================
 // Card-based network configuration page. Each detected interface gets its own
 // card with a configurable role (Internet, Show, Listener, Unused).
@@ -154,7 +154,7 @@ $pluginName = 'fpp-eavesdrop';
         <div class="modal-content bg-dark text-light">
             <div class="modal-header border-secondary">
                 <h5 class="modal-title" id="helpModalLabel">
-                    <i class="fas fa-question-circle"></i> SBS Audio Sync — Help
+                    <i class="fas fa-question-circle"></i> SBS Audio Sync - Help
                 </h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>

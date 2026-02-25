@@ -1,6 +1,6 @@
 <?php
 /**
- * detect.php — Captive Portal Detection Handler (legacy/backup)
+ * detect.php - Captive Portal Detection Handler (legacy/backup)
  * ==============================================================
  *
  * NOTE: The primary captive portal redirect is handled by .htaccess rewrite
@@ -18,7 +18,7 @@
  * the phone "there's a captive portal here" which triggers the portal popup.
  */
 
-$ip = $_SERVER['SERVER_ADDR'] ?? '192.168.60.1';
+$ip = $_SERVER['SERVER_ADDR'] ?? '192.168.50.1';
 $redirect = "http://$ip/listen/listen.html";
 $uri = $_SERVER['REQUEST_URI'] ?? '';
 

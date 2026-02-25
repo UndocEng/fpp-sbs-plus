@@ -1,6 +1,6 @@
 <?php
 // =============================================================================
-// about.php — SBS Audio Sync About Page
+// about.php - SBS Audio Sync About Page
 // =============================================================================
 // Shown under Help > SBS Audio Sync in FPP's menu.
 // FPP's plugin.php wrapper provides the header/nav/footer.

@@ -189,7 +189,7 @@
 <script>
 (() => {
 // =============================================================================
-// FPP EAVESDROP — Adaptive PLL Audio Synchronization
+// FPP EAVESDROP - Adaptive PLL Audio Synchronization
 // =============================================================================
 // Ported from fpp-listener-sync v2.4.0
 //
@@ -461,7 +461,7 @@ function checkClockMismatch(){
   if(clockWarnDismissed||clockWarnShown||!clockOffsetValid)return;
   if(offsetHistory.length<MIN_OFFSET_SAMPLES)return;
   const absOff=Math.abs(clockOffset);
-  if(absOff<60000)return; // less than 1 minute — fine
+  if(absOff<60000)return; // less than 1 minute - fine
   clockWarnShown=true;
   const offSec=Math.abs(clockOffset)/1000;
   let desc;
@@ -639,7 +639,7 @@ async function safePlay(){
 // AUDIO UNLOCK
 // =============================================================================
 // Enable Audio button satisfies browser autoplay policy.
-// Polling and state detection run regardless — this only gates audio playback.
+// Polling and state detection run regardless - this only gates audio playback.
 function unlockAudio(){
   if(audioUnlocked)return;
   audioUnlocked=true;
@@ -774,7 +774,7 @@ async function syncInner(msg){
   const rawPosMs=Number(msg.pos_ms||0);
 
   let targetMs=rawPosMs;
-  // Use clock offset for serverOk check when available (Pi may have wrong clock — no RTC/NTP)
+  // Use clock offset for serverOk check when available (Pi may have wrong clock - no RTC/NTP)
   const timeDiff=clockOffsetValid?Math.abs((nowMs+clockOffset)-serverMs):Math.abs(nowMs-serverMs);
   const serverOk=Number.isFinite(serverMs)&&serverMs>1e12&&timeDiff<300000;
   if(serverOk){
@@ -1064,7 +1064,7 @@ const seqStatus = document.getElementById("seqStatus");
 startSeqBtn.addEventListener("click", async () => {
   const seq = seqSelect.value;
   if(!seq){ showStatus(seqStatus, "Select a playlist or sequence first", false); return; }
-  // User tapped Start — this is a gesture, so unlock audio now
+  // User tapped Start - this is a gesture, so unlock audio now
   unlockAudio();
   startSeqBtn.disabled = true; startSeqBtn.textContent = "Starting...";
   try {

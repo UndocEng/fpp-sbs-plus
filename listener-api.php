@@ -1,6 +1,6 @@
 <?php
 // =============================================================================
-// listener-api.php — Eavesdrop Admin API (Plugin Dashboard Backend)
+// listener-api.php - Eavesdrop Admin API (Plugin Dashboard Backend)
 // =============================================================================
 // Backend for the plugin dashboard. Called via AJAX from dashboard.js.
 // Served through FPP's plugin.php handler (nopage=1 mode).
@@ -238,7 +238,7 @@ function saveConfig() {
     }
 
     $hostapdContent = <<<CONF
-# hostapd-$iface.conf — managed by Eavesdrop plugin (role: $role)
+# hostapd-$iface.conf - managed by Eavesdrop plugin (role: $role)
 interface=$iface
 driver=nl80211
 ssid=$ssid
@@ -482,7 +482,7 @@ function getAllInterfaces() {
 
 function getRoles() {
     $roles = loadRoles();
-    // Return simple role map for dashboard (interface → role string)
+    // Return simple role map for dashboard (interface -> role string)
     $simpleRoles = [];
     foreach ($roles as $k => $v) {
         $simpleRoles[$k] = is_array($v) ? ($v['role'] ?? '') : $v;
@@ -511,10 +511,10 @@ function saveRole() {
         if (isset($roles[$iface]) && is_array($roles[$iface])) {
             $roles[$iface]['role'] = $role;
         } else {
-            // New role assignment — set defaults
+            // New role assignment - set defaults
             $defaults = [
                 'sbs' => ['ssid' => 'EAVESDROP', 'channel' => 6, 'password' => 'Listen123', 'ip' => '192.168.50.1', 'mask' => 24],
-                'listener' => ['ssid' => 'SHOW_AUDIO', 'channel' => 11, 'password' => '', 'ip' => '192.168.60.1', 'mask' => 24],
+                'listener' => ['ssid' => 'SHOW_AUDIO', 'channel' => 11, 'password' => '', 'ip' => '192.168.50.1', 'mask' => 24],
                 'show_network' => [],
             ];
             $cfg = $defaults[$role] ?? [];
@@ -545,7 +545,7 @@ function loadRoles() {
         }
     }
 
-    // Migrate old format: {"wlan0": "listener"} → {"wlan0": {"role": "listener", ...}}
+    // Migrate old format: {"wlan0": "listener"} -> {"wlan0": {"role": "listener", ...}}
     $needsMigration = false;
     foreach ($roles as $iface => $val) {
         if (is_string($val)) {
@@ -558,7 +558,7 @@ function loadRoles() {
         $roles = migrateRoles($roles);
         writeRoles($roles);
     } elseif (empty($roles) && file_exists('/home/fpp/listen-sync/ap.conf')) {
-        // No roles.json but ap.conf exists — migrate from ap.conf
+        // No roles.json but ap.conf exists - migrate from ap.conf
         $roles = migrateFromAPConf();
         if (!empty($roles)) writeRoles($roles);
     }
@@ -640,7 +640,7 @@ function migrateFromAPConf() {
     if ($showEnabled === '1') {
         $showIF = ($wlanIF === 'wlan0') ? 'wlan1' : 'wlan0';
         $showSSID = getAPConfValue('SHOW_AP_SSID') ?: 'SHOW_AUDIO';
-        $showIP = getAPConfValue('SHOW_AP_IP') ?: '192.168.60.1';
+        $showIP = getAPConfValue('SHOW_AP_IP') ?: '192.168.50.1';
         $showMask = intval(getAPConfValue('SHOW_AP_MASK') ?: 24);
         $roles[$showIF] = [
             'role' => 'listener',
@@ -681,7 +681,7 @@ function getInterfaceConfig($iface) {
 }
 
 // =============================================================================
-// WiFi Client Fix — disable ieee80211w after FPP apply
+// WiFi Client Fix - disable ieee80211w after FPP apply
 // =============================================================================
 function fixWifiConnect() {
     $iface = $_POST['interface'] ?? '';
@@ -814,7 +814,7 @@ function getClientsForInterface($iface) {
         return [];
     }
 
-    // Read DHCP leases — per-interface file first, fallback to default
+    // Read DHCP leases - per-interface file first, fallback to default
     $leaseFile = "/var/lib/misc/dnsmasq-{$iface}.leases";
     if (!file_exists($leaseFile)) {
         $leaseFile = "/var/lib/misc/dnsmasq.leases";
