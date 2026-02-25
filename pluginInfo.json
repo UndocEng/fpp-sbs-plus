@@ -3,9 +3,9 @@
     "name": "SBS with Audio Sync",
     "author": "Undocumented Engineer",
     "description": "Turns your RPi with FPP into a Single Board Show (SBS) with WLED universe control, plus a phone listener that lets audiences connect and listen to synchronized show audio",
-    "homeURL": "https://github.com/UndocEng/fpp-eavesdrop-sbs-plus",
-    "srcURL": "https://github.com/UndocEng/fpp-eavesdrop-sbs-plus.git",
-    "bugURL": "https://github.com/UndocEng/fpp-eavesdrop-sbs-plus/issues",
+    "homeURL": "https://github.com/UndocEng/fpp-sbs-plus",
+    "srcURL": "https://github.com/UndocEng/fpp-sbs-plus.git",
+    "bugURL": "https://github.com/UndocEng/fpp-sbs-plus/issues",
     "allowUpdates": 1,
     "versions": [
         {
