@@ -101,6 +101,17 @@ while IFS='|' read -r IFACE ROLE SSID CHANNEL PASSWORD IP MASK; do
         fi
     fi
 
+    # Stop and mask wpa_supplicant on this interface - it conflicts with hostapd.
+    # Mask prevents systemd from restarting it after listener-ap exits.
+    # Uninstall script unmasks it to restore normal operation.
+    if systemctl is-enabled "wpa_supplicant@${IFACE}" &>/dev/null; then
+        echo "[listener-ap] Disabling wpa_supplicant@${IFACE}..."
+        sudo systemctl stop "wpa_supplicant@${IFACE}" 2>/dev/null || true
+        sudo systemctl mask "wpa_supplicant@${IFACE}" 2>/dev/null || true
+    fi
+    sudo pkill -f "wpa_supplicant.*-i${IFACE}" 2>/dev/null || true
+    sleep 1
+
     # Configure interface IP
     sudo ip link set "$IFACE" down 2>/dev/null || true
     sudo ip addr flush dev "$IFACE" 2>/dev/null || true

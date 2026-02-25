@@ -61,6 +61,38 @@ switch ($action) {
 }
 
 
+// -- AP / SSID -------------------------------------------------------
+
+function getAPInterface() {
+  $apConf = "/home/fpp/listen-sync/ap.conf";
+  if (file_exists($apConf)) {
+    $lines = file($apConf, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if ($lines !== false) {
+      foreach ($lines as $line) {
+        $line = trim($line);
+        if ($line === '' || $line[0] === '#') continue;
+        if (strpos($line, 'WLAN_IF=') === 0) {
+          return substr($line, 8);
+        }
+      }
+    }
+  }
+  return 'wlan1';
+}
+
+function getCurrentSSID() {
+  $conf = "/home/fpp/listen-sync/hostapd-listener.conf";
+  $lines = @file($conf, FILE_IGNORE_NEW_LINES);
+  if ($lines === false) return "";
+  foreach ($lines as $line) {
+    if (strpos($line, 'ssid=') === 0) {
+      return substr($line, 5);
+    }
+  }
+  return "";
+}
+
+
 // -- FPP Playback ----------------------------------------------------
 
 function getPlaylists() {

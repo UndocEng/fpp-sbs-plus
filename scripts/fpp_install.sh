@@ -305,7 +305,7 @@ sudo tee "$SUDOERS_FILE" > /dev/null <<'EOF'
 www-data ALL=(ALL) NOPASSWD: /usr/bin/tee /home/fpp/listen-sync/hostapd-*
 www-data ALL=(ALL) NOPASSWD: /usr/bin/tee /home/fpp/listen-sync/roles.json
 www-data ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/dnsmasq.conf
-www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart listener-ap.service
+www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart listener-ap
 www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart dnsmasq
 www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart ws-sync
 www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop hostapd
