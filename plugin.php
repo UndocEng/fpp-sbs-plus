@@ -33,7 +33,7 @@ $pluginName = 'SBSPlus';
         <button id="btn-help" class="btn btn-outline-info btn-sm me-1" title="About SBS Audio Sync">
             <i class="fas fa-question-circle"></i> Help
         </button>
-        <a href="/networkconfig-original.php" class="btn btn-outline-secondary btn-sm"
+        <a href="/networkconfig.php" class="btn btn-outline-secondary btn-sm"
            title="Open FPP's original network configuration page">
             <i class="fas fa-cogs"></i> Advanced (FPP)
         </a>

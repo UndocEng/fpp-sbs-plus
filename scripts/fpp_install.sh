@@ -84,8 +84,8 @@ for f in "$PLUGIN_DIR/www/"*.html "$PLUGIN_DIR/www/"*.js "$PLUGIN_DIR/www/"*.php
   [ -f "$f" ] && sudo cp -f "$f" "$WEBROOT/" 2>/dev/null || true
 done
 
-# Deploy VERSION to listen dir
-sudo cp -f "$PLUGIN_DIR/VERSION" "$WEBROOT/listen/VERSION" 2>/dev/null || true
+# Clean up stale VERSION copy from listen dir (now read from plugin dir)
+sudo rm -f "$WEBROOT/listen/VERSION" 2>/dev/null || true
 
 # Create index.html redirect if admin.html exists
 if [ -f "$WEBROOT/listen/admin.html" ]; then

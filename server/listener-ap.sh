@@ -69,6 +69,24 @@ if [[ -z "$PARSED" ]]; then
     exit 0
 fi
 
+# --- Disable FPP tethering if any SBS role is configured ---
+# FPP's maybeEnableTethering() runs at boot (~6s) and will create a conflicting
+# hostapd config if it finds no IP addresses yet. Writing EnableTethering=2
+# ("Disabled") to the settings file prevents the race condition and persists
+# across reboots.
+FPP_SETTINGS="/home/fpp/media/settings"
+HAS_SBS=$(echo "$PARSED" | grep '|sbs|' || true)
+if [[ -n "$HAS_SBS" ]]; then
+    if grep -q '^EnableTethering' "$FPP_SETTINGS" 2>/dev/null; then
+        # Update existing setting
+        sudo sed -i 's/^EnableTethering.*/EnableTethering = "2"/' "$FPP_SETTINGS"
+    else
+        # Add setting
+        echo 'EnableTethering = "2"' | sudo tee -a "$FPP_SETTINGS" > /dev/null
+    fi
+    echo "[listener-ap] FPP tethering disabled (EnableTethering=2) for SBS mode"
+fi
+
 # Track which interfaces have listener role (for rewrite rule generation)
 LISTENER_INTERFACES=()
 

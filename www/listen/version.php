@@ -2,9 +2,9 @@
 header('Content-Type: application/json');
 header('Cache-Control: no-store');
 
-// SBS+ version from deployed VERSION file
+// SBS+ version — single source of truth in the plugin directory
 $sbsVer = 'unknown';
-$versionFile = __DIR__ . '/VERSION';
+$versionFile = '/home/fpp/media/plugins/SBSPlus/VERSION';
 if (file_exists($versionFile)) {
   $sbsVer = trim(file_get_contents($versionFile));
 }
