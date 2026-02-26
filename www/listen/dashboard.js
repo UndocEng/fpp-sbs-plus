@@ -423,7 +423,7 @@ function buildTetherSection(iface) {
     html += '<label class="col-sm-3 col-form-label"><i class="fas fa-mobile-alt me-1"></i> Tether</label>';
     html += '<div class="col-sm-9 d-flex align-items-center justify-content-between">';
     html += '<small class="text-muted tether-status">Loading...</small>';
-    html += '<a href="/networkconfig-original.php#tab-tethering" target="_blank" class="btn btn-outline-info btn-sm ms-2 text-nowrap">';
+    html += '<a href="/networkconfig.php#tab-tethering" target="_blank" class="btn btn-outline-info btn-sm ms-2 text-nowrap">';
     html += '<i class="fas fa-cog"></i> Tether Settings</a>';
     html += '</div></div>';
 

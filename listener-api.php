@@ -959,10 +959,10 @@ function setFPPTether($mode) {
 }
 
 function disableFPPTetherForSBS() {
-    setFPPTether("2");
+    setFPPTether(2);
     exec("sudo /usr/bin/systemctl stop hostapd 2>/dev/null", $out, $ret);
 }
 
 function restoreFPPTether() {
-    setFPPTether("0");
+    setFPPTether(0);
 }
