@@ -2,9 +2,9 @@
 
 ## Why a Single Board Show?
 
-With the rise of **WLED** and other smart LED controllers that have built-in support for receiving **E1.31** or **DDP** data over WiFi, it's becoming practical to run a small holiday light show entirely from a single Raspberry Pi. Instead of needing dedicated show controllers and proprietary hardware, a few WLED-flashed ESP32 devices and a Pi running Falcon Player can drive a small neighborhood display — sequences, audio, and pixel control all from one board.
+With the rise of **WLED** and other smart WiFi enabled LED controllers that have built-in support for receiving **E1.31** or **DDP** data over WiFi, it's becoming practical to run a small holiday light show entirely from a single Raspberry Pi. Instead of needing dedicated show controllers and proprietary hardware, a few WLED-flashed ESP32 devices and a Pi running Falcon Player can drive a small neighborhood display — sequences, audio, and pixel control all from one board.
 
-**SBS+** takes this a step further: not only does the Pi run the show, it also serves as the WiFi access point for your smart devices *and* provides synced audio to your phone and your audience's phones — no internet connection, no cloud services, no extra hardware beyond what you already have. All the wonderful things FPP can do but now coupled with the ability to play audio from your phone/device. 
+**SBS+** takes this a step further: not only does the Pi run the show, it also serves as the WiFi access point for your smart devices *and* provides synced audio to your phone and your audience's phones — no internet connection, no cloud services, no extra hardware beyond what you already have. All the wonderful things FPP can do but now coupled with the ability to play audio from your phone/device. We even take a stab at correcting for Bluetooth delay with an offset setting. 
 
 ---
 
