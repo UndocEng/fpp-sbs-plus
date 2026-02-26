@@ -1,6 +1,6 @@
 <?php
 // =============================================================================
-// listener-api.php - Eavesdrop Admin API (Plugin Dashboard Backend)
+// listener-api.php - SBS Audio Sync Admin API (Plugin Dashboard Backend)
 // =============================================================================
 // Backend for the plugin dashboard. Called via AJAX from dashboard.js.
 // Served through FPP's plugin.php handler (nopage=1 mode).
@@ -241,7 +241,7 @@ function saveConfig() {
     }
 
     $hostapdContent = <<<CONF
-# hostapd-$iface.conf - managed by Eavesdrop plugin (role: $role)
+# hostapd-$iface.conf - managed by SBS+ plugin (role: $role)
 interface=$iface
 driver=nl80211
 ssid=$ssid

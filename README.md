@@ -12,7 +12,7 @@ With the rise of **WLED** and other smart LED controllers that have built-in sup
 
 | Component | What it does |
 |-----------|-------------|
-| **FPP Admin Eavesdrop** | Show-owner control page — start/stop sequences and playlists, hear synced show audio, manage WiFi APs, and monitor E1.31 devices. Runs on the admin AP (wlan0). |
+| **FPP Admin Control** | Show-owner control page — start/stop sequences and playlists, hear synced show audio, manage WiFi APs, and monitor E1.31 devices. Runs on the admin AP (wlan0). |
 | **FPP Phone Listener** | Public audience page — phones connect to an open WiFi AP (wlan1), get auto-redirected by captive portal, and hear synced show audio. No password, no app, no setup. |
 
 Both pages share the same WebSocket sync server and adaptive PLL engine, so the admin phone and every audience phone stay locked to FPP's playback position.
@@ -23,7 +23,7 @@ Both pages share the same WebSocket sync server and adaptive PLL engine, so the 
 
 ## What This Does
 
-### FPP Admin Eavesdrop (admin.html)
+### FPP Admin Control (admin.html)
 
 The admin page is for the **show owner**. It gives you:
 
@@ -67,7 +67,7 @@ SBS+ runs **two WiFi access points** on one Raspberry Pi — one for the show ow
 **How it works:**
 - The show owner connects to **EAVESDROP** (WPA2, default password `Listen123`) and opens `admin.html` to control the show
 - Audience phones connect to **SHOW_AUDIO** (open WiFi) and are automatically redirected to the listen page via captive portal
-- The two networks are **fully isolated** — phones on SHOW_AUDIO cannot reach admin pages, FPP settings, or E1.31 devices on the eavesdrop network
+- The two networks are **fully isolated** — phones on SHOW_AUDIO cannot reach admin pages, FPP settings, or E1.31 devices on the admin network
 - Both APs share the same WebSocket sync server, so all clients stay in sync
 - Ethernet remains the show backbone for E1.31/multisync to remote FPP players
 
@@ -133,7 +133,7 @@ For non-GitHub pages that support scripts, use the hosted button:
 
 SBS+ must be installed on your **master** FPP (the one in **player mode**), not on a remote. It needs:
 
-- Direct access to the music files in `/home/fpp/media/music/` (both Admin Eavesdrop and Phone Listener serve audio from here)
+- Direct access to the music files in `/home/fpp/media/music/` (both Admin Control and Phone Listener serve audio from here)
 - The FPP API at `127.0.0.1` to read playback status and start/stop playlists
 - Remotes don't have to store media locally — they only receive channel data from the master. Typically, there is no media to play on a remote
 - **SBS mode**: No USB WiFi adapter needed — admin AP runs on onboard wlan0
@@ -182,11 +182,11 @@ cd /home/fpp
 ```
 
 ```bash
-git clone https://github.com/UndocEng/fpp-eavesdrop-sbs-plus.git
+git clone https://github.com/UndocEng/fpp-sbs-plus.git
 ```
 
 ```bash
-cd fpp-eavesdrop-sbs-plus
+cd fpp-sbs-plus
 ```
 
 ### Step 3: Run the installer
@@ -198,7 +198,7 @@ sudo ./install.sh
 You should see output like this:
 ```
 =========================================
-  FPP Eavesdrop - v3.9
+  SBS Audio Sync - v3.9
 =========================================
 
 [install] Web root: /opt/fpp/www
@@ -317,7 +317,7 @@ This is an FPP output configuration issue, not a listener issue. Check:
 To get the latest version:
 
 ```bash
-cd /home/fpp/fpp-eavesdrop-sbs-plus
+cd /home/fpp/fpp-sbs-plus
 git pull
 sudo ./install.sh
 ```
@@ -329,7 +329,7 @@ sudo ./install.sh
 To completely remove everything this project installed:
 
 ```bash
-cd /home/fpp/fpp-eavesdrop-sbs-plus
+cd /home/fpp/fpp-sbs-plus
 sudo ./uninstall.sh
 ```
 
@@ -342,14 +342,14 @@ This removes:
 - The sudoers entry for WiFi management
 - The config directory at `/home/fpp/listen-sync/` (AP config, hostapd config, scripts, sync log)
 - The FPP plugin registration and header icon
-- The Eavesdrop footer button from `custom.js`
+- The SBS+ footer button from `custom.js`
 - Network routing rules (nftables tables `listener_ap` and `show_ap`, policy routes)
 - Captive portal `.htaccess` from the web root
 
 After uninstalling, your FPP is exactly as it was before. You can then delete the project folder:
 
 ```bash
-rm -rf /home/fpp/fpp-eavesdrop-sbs-plus
+rm -rf /home/fpp/fpp-sbs-plus
 ```
 
 ---
@@ -360,15 +360,15 @@ rm -rf /home/fpp/fpp-eavesdrop-sbs-plus
 
 | File | Component | What it does |
 |------|-----------|-------------|
-| `www/listen/admin.html` | Admin Eavesdrop | Admin page — playback controls, WiFi AP settings, SBS+ config, clock management, debug UI |
+| `www/listen/admin.html` | Admin Control | Admin page — playback controls, WiFi AP settings, SBS+ config, clock management, debug UI |
 | `www/listen/listen.html` | Phone Listener | Public listen page — audio sync, now playing display, debug UI (audience-facing) |
 | `www/listen/index.html` | Both | Redirects to `listen.html` (makes QR codes and captive portal work) |
-| `www/listen/status.php` | Admin Eavesdrop | Returns current FPP playback status as JSON |
-| `www/listen/admin.php` | Admin Eavesdrop | Backend — start/stop commands, WiFi AP config (SSID, password, IP), connected clients |
+| `www/listen/status.php` | Admin Control | Returns current FPP playback status as JSON |
+| `www/listen/admin.php` | Admin Control | Backend — start/stop commands, WiFi AP config (SSID, password, IP), connected clients |
 | `www/listen/version.php` | Both | Returns version info (reads from `VERSION` file) |
 | `www/listen/portal-api.php` | Phone Listener | Captive portal API (RFC 8908) — tells phones where to redirect |
 | `www/listen/detect.php` | Phone Listener | Legacy captive portal detection fallback for older devices |
-| `www/listen/logo.png` | Admin Eavesdrop | Eavesdrop logo (gold/amber) |
+| `www/listen/logo.png` | Admin Control | Admin logo (gold/amber) |
 | `www/listen/logo-public.png` | Phone Listener | Listener logo (blue/cyan) |
 
 ### Server (deployed to `/home/fpp/listen-sync/`)
@@ -402,7 +402,7 @@ rm -rf /home/fpp/fpp-eavesdrop-sbs-plus
 
 ## How Audio Sync Works
 
-Eavesdrop uses an **adaptive Phase-Locked Loop (PLL)** to keep the phone's audio in sync with FPP's sequence playback. Instead of repeatedly jumping to the correct position (which causes audible pops), it smoothly adjusts the playback speed to converge on FPP's position and stay locked.
+SBS+ uses an **adaptive Phase-Locked Loop (PLL)** to keep the phone's audio in sync with FPP's sequence playback. Instead of repeatedly jumping to the correct position (which causes audible pops), it smoothly adjusts the playback speed to converge on FPP's position and stay locked.
 
 ### Transport
 

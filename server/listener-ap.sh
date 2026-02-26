@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# listener-ap.sh - Role-driven AP manager for FPP Eavesdrop
+# listener-ap.sh - Role-driven AP manager for FPP SBS Audio Sync
 # =============================================================================
 # Reads roles.json and configures each interface according to its assigned role:
 #   sbs:          WPA2 admin AP (WLED/show devices join, no isolation)
@@ -8,7 +8,7 @@
 #   show_network: Skip (managed by FPP/wpa_supplicant)
 #   unused:       Skip
 #
-# Adjust settings via the Eavesdrop dashboard or /home/fpp/listen-sync/roles.json
+# Adjust settings via the SBS Audio Sync dashboard or /home/fpp/listen-sync/roles.json
 # =============================================================================
 
 set -uo pipefail

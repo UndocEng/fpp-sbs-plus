@@ -39,8 +39,8 @@ $version = @file_get_contents(dirname(__FILE__) . '/VERSION') ?: 'unknown';
 
 <h4>Links</h4>
 <ul>
-    <li><a href="https://github.com/UndocEng/fpp-eavesdrop-sbs-plus" target="_blank" rel="noopener">GitHub Repository</a></li>
-    <li><a href="https://github.com/UndocEng/fpp-eavesdrop-sbs-plus/issues" target="_blank" rel="noopener">Report a Bug</a></li>
+    <li><a href="https://github.com/UndocEng/fpp-sbs-plus" target="_blank" rel="noopener">GitHub Repository</a></li>
+    <li><a href="https://github.com/UndocEng/fpp-sbs-plus/issues" target="_blank" rel="noopener">Report a Bug</a></li>
 </ul>
 
 <h4>Credits</h4>

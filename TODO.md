@@ -1,6 +1,6 @@
 # SBS+ TODO
 
-## Port from fpp-eavesdrop (V3.6_Add_BT_Delay branch)
+## Port from fpp-sbs-plus (V3.6_Add_BT_Delay branch)
 
 - [ ] BT Speaker Delay profile selector card (listen.html / admin.html)
 - [ ] BT delay PLL integration (`targetMs = rawPosMs + elapsed - btDelayMs`)
