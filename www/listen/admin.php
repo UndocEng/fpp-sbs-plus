@@ -22,6 +22,9 @@ switch ($action) {
   case 'start_sequence':
     echo json_encode(startSequence($_POST['sequence'] ?? ''));
     break;
+  case 'get_audio_url':
+    echo json_encode(getAudioUrl($_POST['base'] ?? ''));
+    break;
   case 'stop_playback':
     echo json_encode(stopPlayback());
     break;
@@ -112,6 +115,19 @@ function getSequences() {
   if (!is_array($data)) return [];
   // Return with .fseq extension for Start Playlist command
   return array_map(function($s) { return $s . '.fseq'; }, array_values($data));
+}
+
+
+function getAudioUrl($base) {
+  if ($base === '') return ["success" => false, "error" => "No base name"];
+  $musicDir = '/home/fpp/media/music';
+  $formats = ['mp3', 'm4a', 'mp4', 'aac', 'ogg', 'wav'];
+  foreach ($formats as $ext) {
+    if (file_exists("$musicDir/$base.$ext")) {
+      return ["success" => true, "url" => "/music/" . rawurlencode($base) . ".$ext"];
+    }
+  }
+  return ["success" => false, "error" => "No audio file found"];
 }
 
 

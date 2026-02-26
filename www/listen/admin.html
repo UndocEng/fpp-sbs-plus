@@ -295,6 +295,15 @@ let currentBase="", pollTimer=null, haveMetadata=false, needInitialSeek=false, l
 let logFrozen=false, wasPlaying=false;
 let pendingMsg=null, playAttempting=false;
 
+// --- BT Pre-Start State ---
+// When btDelayMs > 0 and user clicks Start, audio plays locally first,
+// then FSEQ starts after btDelayMs. This keeps the admin audio btDelayMs
+// ahead so BT speaker latency brings it back in sync with lights.
+// FPP's own audio/FSEQ sync is unaffected — RPi audio is the master clock.
+let btPreStartActive=false;    // true while pre-start in progress (blocks sync stop/pause)
+let btPreStartGraceUntil=0;    // timestamp: ignore sync stop messages until this time
+let btPreStartAbort=false;     // set by Stop button to cancel pre-start
+
 // --- WebSocket Transport ---
 const WS_RECONNECT_MS=2000;
 const WS_PING_INTERVAL_MS=1000;
@@ -714,26 +723,38 @@ async function syncInner(msg){
   }
 
   // --- Track Change ---
+  // Skip track change if BT pre-start already loaded this track
   if(msg.base&&msg.base!==currentBase){
-    logBox.textContent='';logCount=0;logFrozen=false;
-    document.getElementById('logStatus').textContent='';
-    document.getElementById('resumeLogBtn').style.display='none';
-    log('TRACK CHANGE: '+msg.base+' src='+msg.mp3_url);
-    sendReport('TRACK',0,1.0);
-    currentBase=msg.base;
-    haveMetadata=false;
-    needInitialSeek=true;
-    awaitingStart=false;
-    audio.playbackRate=1.0;
-    audio.src=msg.mp3_url||'';
-    audio.load();
-    pllReset();
-    errHistoryAll=[];errHistory2s=[];
-    effRateWallMs=0;
+    if(btPreStartActive){
+      // Pre-start is in progress and WS just started broadcasting the new track.
+      // Don't reload audio — we already have it loaded and playing ahead.
+      log('BT PRE-START: skipping track change for '+msg.base+' (already loaded)');
+    }else{
+      logBox.textContent='';logCount=0;logFrozen=false;
+      document.getElementById('logStatus').textContent='';
+      document.getElementById('resumeLogBtn').style.display='none';
+      log('TRACK CHANGE: '+msg.base+' src='+msg.mp3_url);
+      sendReport('TRACK',0,1.0);
+      currentBase=msg.base;
+      haveMetadata=false;
+      needInitialSeek=true;
+      awaitingStart=false;
+      audio.playbackRate=1.0;
+      audio.src=msg.mp3_url||'';
+      audio.load();
+      pllReset();
+      errHistoryAll=[];errHistory2s=[];
+      effRateWallMs=0;
+    }
   }
 
   // --- Stop State ---
+  // During BT pre-start (or brief grace period after FSEQ start command),
+  // ignore stop messages — FPP hasn't started yet or WS hasn't detected it.
   if(msg.state==='stop'){
+    if(btPreStartActive||Date.now()<btPreStartGraceUntil){
+      return;
+    }
     if(wasPlaying){
       log('STATE: stop');
       sendReport('STOP',0,1.0);
@@ -756,6 +777,9 @@ async function syncInner(msg){
 
   // --- Pause State ---
   if(msg.state==='pause'){
+    if(btPreStartActive||Date.now()<btPreStartGraceUntil){
+      return;
+    }
     log('STATE: pause');
     audio.pause();
     audio.playbackRate=1.0;
@@ -1067,7 +1091,28 @@ startSeqBtn.addEventListener("click", async () => {
   if(!seq){ showStatus(seqStatus, "Select a playlist or sequence first", false); return; }
   // User tapped Start - this is a gesture, so unlock audio now
   unlockAudio();
-  startSeqBtn.disabled = true; startSeqBtn.textContent = "Starting...";
+  startSeqBtn.disabled = true;
+
+  const baseName = seq.replace(/\.fseq$/i, '');
+
+  // BT Pre-Start: if BT delay is active AND we can resolve the audio file,
+  // play audio locally first, wait btDelayMs, then start the FSEQ on FPP.
+  // This puts the admin audio btDelayMs ahead so BT speaker latency compensates.
+  if(btDelayMs > 0){
+    try {
+      const audioRes = await adminPost({ action: "get_audio_url", base: baseName });
+      if(audioRes.success && audioRes.url){
+        await btPreStart(seq, baseName, audioRes.url);
+        startSeqBtn.disabled = false; startSeqBtn.textContent = "Start";
+        return;
+      }
+    } catch(e){}
+    // Audio URL lookup failed (playlist, or no matching audio) — fall through to normal start
+    log('BT PRE-START: no audio file found for "'+baseName+'", using normal start');
+  }
+
+  // Normal start (no BT delay, or audio lookup failed)
+  startSeqBtn.textContent = "Starting...";
   try {
     const res = await adminPost({ action: "start_sequence", sequence: seq });
     showStatus(seqStatus, res.success ? "Started: " + seq : (res.error || "Failed"), res.success);
@@ -1075,7 +1120,103 @@ startSeqBtn.addEventListener("click", async () => {
   startSeqBtn.disabled = false; startSeqBtn.textContent = "Start";
 });
 
+// BT Pre-Start: play audio locally, wait btDelayMs, then start FSEQ
+async function btPreStart(seq, baseName, audioUrl){
+  btPreStartActive = true;
+  btPreStartAbort = false;
+
+  try {
+    // Set currentBase early so sync() won't trigger a track change reload
+    // when the WS server starts broadcasting this sequence
+    currentBase = baseName;
+    haveMetadata = false;
+    needInitialSeek = false;
+    audio.playbackRate = 1.0;
+    audio.src = audioUrl;
+    audio.load();
+
+    startSeqBtn.textContent = "Loading audio...";
+    log('BT PRE-START: loading '+audioUrl+' (delay='+btDelayMs+'ms)');
+
+    // Wait for audio metadata
+    await new Promise((resolve, reject) => {
+      if(haveMetadata){ resolve(); return; }
+      const onMeta = () => { audio.removeEventListener('loadedmetadata', onMeta); audio.removeEventListener('error', onErr); resolve(); };
+      const onErr  = () => { audio.removeEventListener('loadedmetadata', onMeta); audio.removeEventListener('error', onErr); reject(new Error('Audio load failed')); };
+      audio.addEventListener('loadedmetadata', onMeta);
+      audio.addEventListener('error', onErr);
+    });
+    haveMetadata = true;
+
+    if(btPreStartAbort){ throw new Error('Aborted'); }
+
+    // Start playing at position 0
+    audio.currentTime = 0;
+    startSeqBtn.textContent = "Pre-start (" + btDelayMs + "ms)...";
+    log('BT PRE-START: playing audio, FSEQ starts in '+btDelayMs+'ms');
+
+    playAttempting = true;
+    await safePlay();
+    playAttempting = false;
+
+    // Wait btDelayMs — audio plays ahead while we wait
+    await new Promise(r => setTimeout(r, btDelayMs));
+
+    if(btPreStartAbort){ throw new Error('Aborted'); }
+
+    // Initialize PLL state for near-zero error when sync ticks arrive
+    pllReset();
+    errHistoryAll = []; errHistory2s = [];
+    settleUntil = Date.now() + 1500;
+    effRateWallMs = Date.now();
+    effRateLocalMs = audio.currentTime * 1000;
+    wasPlaying = true;
+
+    // Now start the FSEQ on FPP
+    startSeqBtn.textContent = "Starting FSEQ...";
+    log('BT PRE-START: sending FSEQ start command (audio at '+Math.round(audio.currentTime*1000)+'ms)');
+
+    // Release sync guard with a grace period — WS might still broadcast
+    // "stop" for up to ~200ms until the next poll detects FPP is playing
+    btPreStartActive = false;
+    btPreStartGraceUntil = Date.now() + 500;
+
+    const res = await adminPost({ action: "start_sequence", sequence: seq });
+    showStatus(seqStatus, res.success ? "Started: " + seq + " (BT pre-start)" : (res.error || "Failed"), res.success);
+    sendReport('START', 0, 1.0);
+
+  } catch(e) {
+    btPreStartActive = false;
+    btPreStartGraceUntil = 0;
+    if(e.message === 'Aborted'){
+      log('BT PRE-START: aborted by user');
+      showStatus(seqStatus, "Pre-start cancelled", false);
+    } else {
+      log('BT PRE-START: failed — '+e.message);
+      showStatus(seqStatus, "Pre-start failed: " + (e.message || e), false);
+    }
+    audio.pause();
+    audio.currentTime = 0;
+    audio.playbackRate = 1.0;
+    currentBase = '';
+    needInitialSeek = false;
+    pllReset();
+  }
+}
+
 stopSeqBtn.addEventListener("click", async () => {
+  // If BT pre-start is in progress, abort it
+  if(btPreStartActive){
+    btPreStartAbort = true;
+    btPreStartActive = false;
+    btPreStartGraceUntil = 0;
+    audio.pause();
+    audio.currentTime = 0;
+    audio.playbackRate = 1.0;
+    currentBase = '';
+    pllReset();
+    log('BT PRE-START: stop requested, aborting');
+  }
   stopSeqBtn.disabled = true; stopSeqBtn.textContent = "Stopping...";
   try {
     const res = await adminPost({ action: "stop_playback" });
