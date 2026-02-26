@@ -32,7 +32,7 @@ $version = @file_get_contents(dirname(__FILE__) . '/VERSION') ?: 'unknown';
 <ol>
     <li>A WiFi adapter creates a listener network for audience members</li>
     <li>Phones connect and are directed to the listener page via captive portal</li>
-    <li>A WebSocket server broadcasts the current show position every 100ms</li>
+    <li>A WebSocket server broadcasts the current show position every 200ms</li>
     <li>Each phone's browser adjusts its audio playback rate to stay in sync</li>
     <li>Typical sync accuracy: 5-25ms (imperceptible to the human ear)</li>
 </ol>
