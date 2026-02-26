@@ -190,7 +190,7 @@
 <script>
 (() => {
 // =============================================================================
-// FPP EAVESDROP - Adaptive PLL Audio Synchronization
+// FPP SBS Audio Sync - Adaptive PLL Audio Synchronization
 // =============================================================================
 // Ported from fpp-listener-sync v2.4.0
 //
@@ -1006,9 +1006,9 @@ async function syncInner(msg){
   if(++logThrottle%20===0)log('PLL err='+Math.round(phaseErr*1000)+'ms rate='+audio.playbackRate.toFixed(3)+'x base='+pll.baseRate.toFixed(4));
 }
 
-// Fetch version (eavesdrop JSON format)
+// Fetch version
 fetch("./version.php?t=" + Date.now()).then(r => r.json()).then(v => {
-  const verText = "SBS Audio Sync v" + (v.eavesdrop || "?") + " | FPP v" + (v.fpp || "?");
+  const verText = "SBS Audio Sync v" + (v.sbs || "?") + " | FPP v" + (v.fpp || "?");
   document.getElementById("ver").textContent = verText;
   document.getElementById("verFooter").textContent = verText;
 }).catch(() => { document.getElementById("ver").textContent = "Version: unknown"; });

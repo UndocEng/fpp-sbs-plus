@@ -1,5 +1,5 @@
 <?php
-// FPP Plugin Menu Entries for Eavesdrop
+// FPP Plugin Menu Entries for SBS Audio Sync
 // This file is included by FPP's menu.inc for each dropdown section.
 // $menu = current section being rendered (status, content, output, help)
 // $plugin = this plugin's directory name

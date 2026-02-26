@@ -1,9 +1,9 @@
-# Sync Algorithm Porting Reference: listener-sync → eavesdrop
+# Sync Algorithm Porting Reference: listener-sync → SBS+
 
 ## Purpose
 This document captures everything needed to port the adaptive PLL sync algorithm
-from `fpp-listener-sync` (v2.4.0) into `fpp-eavesdrop`. Written to be consumed
-by a fresh Claude session working in the eavesdrop repo.
+from `fpp-listener-sync` (v2.4.0) into `fpp-sbs-plus`. Written to be consumed
+by a fresh Claude session working in the SBS+ repo.
 
 ## Source Repo
 - `c:\Users\TNash\Documents\GitHub\fpp-listener-sync`
@@ -11,7 +11,7 @@ by a fresh Claude session working in the eavesdrop repo.
 - Key file: `www/listen/index.html` — all sync JS is inline (~1180 lines, heavily commented)
 
 ## Target Repo
-- `c:\Users\TNash\Documents\GitHub\fpp-eavesdrop`
+- `c:\Users\TNash\Documents\GitHub\fpp-sbs-plus`
 - Key file: `www/listen/admin.html` — admin page with sync JS inline (~580 lines)
 - Keep: admin UI (start/stop sequences, WiFi SSID/password), version display
 - Replace: entire sync algorithm JS + add debug UI
@@ -19,14 +19,14 @@ by a fresh Claude session working in the eavesdrop repo.
 ## Scope
 - Port the **full adaptive PLL sync algorithm** including debug UI
 - Port the **WebSocket server** (`ws-sync-server.py`) and Apache proxy config
-- Keep HTTP polling as fallback (eavesdrop already has this)
-- Keep eavesdrop's admin features (sequence start/stop, WiFi settings)
+- Keep HTTP polling as fallback (SBS+ already has this)
+- Keep SBS+'s admin features (sequence start/stop, WiFi settings)
 - Owner-only for now, but design for future branch serving both owner + public listeners
 - Deployment target: master Pi (FPP on localhost)
 
 ---
 
-## What Eavesdrop Has Now (v3.1) — To Be Replaced
+## What SBS+ Has Now (v3.1) — To Be Replaced
 
 ### Sync Constants (listen.html lines 148-154)
 ```javascript
@@ -39,7 +39,7 @@ const RATE_EMA     = 0.05;   // → same
 const SEEK_COOLDOWN_MS = 2000; // → same
 ```
 
-### What's Missing in Eavesdrop
+### What's Missing in SBS+
 1. **No settle period** — corrections start immediately, noisy
 2. **No avg2s** — uses instantaneous phaseErr (noisy, causes oscillation)
 3. **No adaptive Kp** — fixed Kp=0.3 (too aggressive when error is small)
@@ -202,7 +202,7 @@ After=network.target
 [Service]
 Type=simple
 User=fpp
-ExecStart=/usr/bin/python3 /home/fpp/fpp-eavesdrop/ws-sync-server.py
+ExecStart=/usr/bin/python3 /home/fpp/fpp-sbs-plus/ws-sync-server.py
 Restart=always
 RestartSec=3
 
@@ -235,14 +235,14 @@ Events: TRACK, INITIAL_SEEK, START, SYNC (throttled 1/sec), CORRECTION, STOP (on
 
 ---
 
-## Key Differences: Eavesdrop vs Listener-Sync
+## Key Differences: SBS+ vs Listener-Sync
 
-| Aspect | Listener-Sync | Eavesdrop | Port Decision |
+| Aspect | Listener-Sync | SBS+ | Port Decision |
 |--------|--------------|-----------|---------------|
-| WiFi | Open (no password) | WPA2 protected | Keep eavesdrop's WPA2 |
-| Admin UI | None | Start/stop sequences, WiFi config | Keep eavesdrop's admin |
-| Network isolation | nftables, captive portal, .htaccess | Basic dnsmasq | Keep eavesdrop's simple approach |
-| Deployment | Remote Pi | Master Pi | Keep eavesdrop's master approach |
+| WiFi | Open (no password) | WPA2 protected | Keep SBS+'s WPA2 |
+| Admin UI | None | Start/stop sequences, WiFi config | Keep SBS+'s admin |
+| Network isolation | nftables, captive portal, .htaccess | Basic dnsmasq | Keep SBS+'s simple approach |
+| Deployment | Remote Pi | Master Pi | Keep SBS+'s master approach |
 | Audio source | `/music/` symlink | `/music/` symlink | Same |
 | status.php | Has it | Has it (nearly identical) | Update to match listener-sync's |
 | WebSocket | ws-sync-server.py + systemd | None | Add from listener-sync |
@@ -271,7 +271,7 @@ Events: TRACK, INITIAL_SEEK, START, SYNC (throttled 1/sec), CORRECTION, STOP (on
 
 ---
 
-## Files to Create/Modify in Eavesdrop
+## Files to Create/Modify in SBS+
 
 ### Modify:
 - `www/listen/admin.html` — Replace sync JS, add debug UI HTML, keep admin UI (start/stop, WiFi settings)
@@ -279,7 +279,7 @@ Events: TRACK, INITIAL_SEEK, START, SYNC (throttled 1/sec), CORRECTION, STOP (on
 - `install.sh` — Add ws-sync-server.py deployment, systemd service, Apache proxy config, `a2enmod proxy proxy_wstunnel`
 
 ### Add:
-- `ws-sync-server.py` — Copy from listener-sync, adjust paths (`/home/fpp/fpp-eavesdrop/` vs `/home/fpp/fpp-listener-sync/`)
+- `ws-sync-server.py` — Copy from listener-sync, adjust paths (`/home/fpp/fpp-sbs-plus/` vs `/home/fpp/fpp-listener-sync/`)
 - `server/ws-sync-server.service` — systemd unit for the WS server
 - `config/apache-listener.conf` — Apache proxy config for `/ws`
 

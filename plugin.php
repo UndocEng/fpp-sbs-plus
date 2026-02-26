@@ -1,6 +1,6 @@
 <?php
 // =============================================================================
-// plugin.php - Eavesdrop Network Dashboard
+// plugin.php - SBS Audio Sync Network Dashboard
 // =============================================================================
 // Card-based network configuration page. Each detected interface gets its own
 // card with a configurable role (Internet, Show, Listener, Unused).
@@ -164,7 +164,7 @@ $pluginName = 'SBSPlus';
                 </div>
             </div>
             <div class="modal-footer border-secondary">
-                <a href="https://github.com/UndocEng/fpp-eavesdrop-sbs-plus" target="_blank" class="btn btn-outline-info btn-sm me-auto">
+                <a href="https://github.com/UndocEng/fpp-sbs-plus" target="_blank" class="btn btn-outline-info btn-sm me-auto">
                     <i class="fab fa-github"></i> GitHub
                 </a>
                 <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>

@@ -2,11 +2,11 @@
 header('Content-Type: application/json');
 header('Cache-Control: no-store');
 
-// Eavesdrop version from deployed VERSION file
-$eavesdropVer = 'unknown';
+// SBS+ version from deployed VERSION file
+$sbsVer = 'unknown';
 $versionFile = __DIR__ . '/VERSION';
 if (file_exists($versionFile)) {
-  $eavesdropVer = trim(file_get_contents($versionFile));
+  $sbsVer = trim(file_get_contents($versionFile));
 }
 
 // FPP version from API
@@ -17,6 +17,6 @@ if (isset($data['version'])) {
 }
 
 echo json_encode([
-  'eavesdrop' => $eavesdropVer,
+  'sbs' => $sbsVer,
   'fpp' => $fppVer
 ]);

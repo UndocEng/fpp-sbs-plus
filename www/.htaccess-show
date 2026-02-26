@@ -21,7 +21,7 @@
 #     Allowed: /listen/listen.html, status.php, version.php, portal-api.php,
 #              detect.php, logo*.png, /music/, /ws
 #     Blocked: /listen/admin.html, /listen/admin.php, /api/, /settings/, etc.
-#   All other sources (eavesdrop AP, localhost, eth0) get full FPP access.
+#   All other sources (SBS AP, localhost, eth0) get full FPP access.
 #
 # RULE ORDER (processed top to bottom, first match wins):
 #   1. Captive portal detection URLs from show subnet → redirect
@@ -78,13 +78,13 @@
     # --- Rule 3: Block everything else from show network ---
     # Any path not in the whitelist above (e.g., /listen/admin.html,
     # /listen/admin.php, /api/, /settings/) gets redirected to listen.html.
-    # This protects FPP's admin interface and the eavesdrop admin page.
+    # This protects FPP's admin interface and the SBS admin page.
     # Also catches wildcard domain requests (phone tried to load google.com
     # but DNS resolved it to the show AP IP).
     RewriteCond %{REMOTE_ADDR} ^__SHOW_SUBNET_ESC__
     RewriteRule ^ http://__SHOW_AP_IP__/listen/listen.html [R=302,L]
 
     # --- Rule 4: All other sources pass through ---
-    # Eavesdrop AP clients, localhost, eth0, fpp.local get full FPP access.
+    # SBS AP clients, localhost, eth0, fpp.local get full FPP access.
     # No rule needed - requests that don't match the show subnet proceed normally.
 </IfModule>

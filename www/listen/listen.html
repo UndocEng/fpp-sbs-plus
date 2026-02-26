@@ -1252,7 +1252,7 @@ async function syncInner(msg){
 }
 
 // Fetch and display version (cache-busting)
-fetch('/listen/version.php?t='+Date.now()).then(r=>r.json()).then(v=>{document.getElementById('version').textContent='v'+(v.eavesdrop||'?')+' | FPP v'+(v.fpp||'?');}).catch(()=>{});
+fetch('/listen/version.php?t='+Date.now()).then(r=>r.json()).then(v=>{document.getElementById('version').textContent='v'+(v.sbs||'?')+' | FPP v'+(v.fpp||'?');}).catch(()=>{});
 
 </script>
 

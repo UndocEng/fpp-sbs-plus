@@ -1,5 +1,5 @@
 // =============================================================================
-// dashboard.js - Eavesdrop Network Dashboard
+// dashboard.js - SBS Audio Sync Network Dashboard
 // =============================================================================
 // Card-based network configuration. Each interface gets a card with a
 // configurable role:

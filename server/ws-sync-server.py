@@ -3,7 +3,7 @@
 FPP WebSocket Sync Beacon
 =========================
 
-This is the server-side component of the FPP Eavesdrop sync system. It runs as
+This is the server-side component of the FPP SBS Audio Sync system. It runs as
 a systemd service (ws-sync.service) on the Raspberry Pi and does three things:
 
 1. POLLS THE FPP API every 100ms to get the current playback state (playing/
