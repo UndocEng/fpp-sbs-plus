@@ -177,7 +177,7 @@ if ((nowMs - pll.lastRateUpdateMs) >= rateInterval) {
 ## WebSocket Server (ws-sync-server.py)
 
 Python3 asyncio + websockets library (apt version 10.4 on Pi).
-- Polls `http://127.0.0.1/api/fppd/status` every 100ms
+- Polls `http://127.0.0.1/api/fppd/status` every 200ms
 - Broadcasts state to all clients: `{state, base, pos_ms, mp3_url, server_ms}`
 - Handles ping/pong for clock offset
 - Handles report messages → writes to `/home/fpp/listen-sync/sync.log`

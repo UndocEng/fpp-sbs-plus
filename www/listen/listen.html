@@ -146,7 +146,7 @@
 //
 // HOW IT WORKS (high level):
 //   1. TRANSPORT: A WebSocket connection (preferred) or HTTP polling (fallback)
-//      receives the current FPP playback state every ~100ms from the server.
+//      receives the current FPP playback state every ~200ms from the server.
 //      Each message contains: state (play/stop/pause), track name, position
 //      in milliseconds, and a server timestamp for clock offset calculation.
 //
@@ -244,7 +244,7 @@ let logFrozen=false, wasPlaying=false;
 let pendingMsg=null, playAttempting=false;
 
 // --- WebSocket Transport ---
-// Primary transport: WebSocket gives us push-based updates at ~100ms from the server.
+// Primary transport: WebSocket gives us push-based updates at ~200ms from the server.
 // Falls back to HTTP polling if WebSocket fails to connect (e.g., proxy issues).
 const WS_RECONNECT_MS=2000;       // retry WebSocket connection every 2s after disconnect
 const WS_PING_INTERVAL_MS=1000;   // send clock-sync pings every 1s in steady state
@@ -527,7 +527,7 @@ function updateClockOffset(serverTs, clientSendTs, rtt){
 // Connects to ws://<hostname>/ws which Apache proxies to the Python WebSocket
 // server on port 8080 (via mod_proxy_wstunnel, configured in apache-listener.conf).
 //
-// The server pushes FPP state every ~100ms to all connected clients, plus handles
+// The server pushes FPP state every ~200ms to all connected clients, plus handles
 // ping/pong for clock offset and accepts report messages for server-side logging.
 //
 // On disconnect, we fall back to HTTP polling and attempt to reconnect every 2s.
@@ -744,7 +744,7 @@ function beginScheduledStart(targetSec){
 // SYNC ALGORITHM - The core of the system
 // =============================================================================
 //
-// Called every time we receive a state update from the server (~100ms via WS,
+// Called every time we receive a state update from the server (~200ms via WS,
 // ~250ms via HTTP). Each call computes where the audio *should* be, compares
 // to where it actually is, and applies corrections via the PLL.
 //
@@ -1060,7 +1060,7 @@ async function syncInner(msg){
   // THIS IS THE PLL'S ERROR INPUT (not instantaneous error).
   // Why avg2s instead of instantaneous?
   //   - Instantaneous error is noisy (+/-80ms) due to network jitter and
-  //     FPP's ~100ms poll interval. Using it directly causes the PLL to
+  //     FPP's ~200ms poll interval. Using it directly causes the PLL to
   //     overcorrect and oscillate.
   //   - avg2s is smooth and stable, giving the PLL a clean signal.
   //   - 2 seconds is short enough to track real drift but long enough

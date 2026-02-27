@@ -6,7 +6,7 @@ FPP WebSocket Sync Beacon
 This is the server-side component of the FPP SBS Audio Sync system. It runs as
 a systemd service (ws-sync.service) on the Raspberry Pi and does three things:
 
-1. POLLS THE FPP API every 100ms to get the current playback state (playing/
+1. POLLS THE FPP API every 200ms to get the current playback state (playing/
    stopped/paused, which track, position in milliseconds, etc.).
 
 2. BROADCASTS that state to all connected WebSocket clients (phones). This is
@@ -252,7 +252,7 @@ async def broadcast(message):
 
 
 async def fpp_poll_loop():
-    """Main loop: poll FPP API every 100ms, broadcast state to all clients.
+    """Main loop: poll FPP API every 200ms, broadcast state to all clients.
 
     Timing note: server_ms is the midpoint of the API call (average of before
     and after timestamps). This is the best estimate of when pos_ms was valid.
@@ -281,7 +281,7 @@ async def fpp_poll_loop():
         if current_state:
             await broadcast(json.dumps(current_state))
 
-        # Sleep for remainder of the 100ms interval (minus time already spent)
+        # Sleep for remainder of the 200ms interval (minus time already spent)
         elapsed = time.time() - t_before
         sleep_s = max(0.01, (POLL_INTERVAL_MS / 1000.0) - elapsed)
         await asyncio.sleep(sleep_s)
@@ -304,7 +304,7 @@ async def handle_client(websocket, path=None):
 
     try:
         # Send current FPP state immediately so the client doesn't have to
-        # wait up to 100ms for the next broadcast tick
+        # wait up to 200ms for the next broadcast tick
         if current_state:
             await websocket.send(json.dumps(current_state))
 
