@@ -6,7 +6,7 @@ After=network.target
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/home/fpp/listen-sync/listener-ap.sh
-ExecStop=/bin/bash -c 'pkill -f hostapd-listener.conf || true; pkill -f hostapd-show.conf || true; pkill -f listener-dnsmasq.conf || true; pkill -f show-dnsmasq.conf || true; nft delete table inet show_ap 2>/dev/null || true; rm -f /home/fpp/listen-sync/show-rewrite.conf /opt/fpp/www/.htaccess 2>/dev/null || true; systemctl reload apache2 2>/dev/null || true'
+ExecStop=/bin/bash -c 'pkill -f "hostapd.*listen-sync" || true; pkill -f "dnsmasq-wlan" || true; nft delete table inet listener_wlan0 2>/dev/null || true; nft delete table inet listener_wlan1 2>/dev/null || true; nft delete table inet show_ap 2>/dev/null || true; rm -f /home/fpp/listen-sync/show-rewrite.conf /tmp/dnsmasq-wlan*.conf 2>/dev/null || true; systemctl reload apache2 2>/dev/null || true'
 
 [Install]
 WantedBy=multi-user.target

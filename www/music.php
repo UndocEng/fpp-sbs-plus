@@ -14,7 +14,7 @@ if ($file === '' || strpos($file, '..') !== false) {
   exit;
 }
 
-$allowed = ['mp3','m4a','aac','ogg','wav'];
+$allowed = ['mp3','m4a','mp4','aac','ogg','wav'];
 $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
 if (!in_array($ext, $allowed, true)) {
   http_response_code(415);
@@ -33,6 +33,7 @@ if (!is_file($path)) {
 $types = [
   'mp3' => 'audio/mpeg',
   'm4a' => 'audio/mp4',
+  'mp4' => 'audio/mp4',
   'aac' => 'audio/aac',
   'ogg' => 'audio/ogg',
   'wav' => 'audio/wav',
