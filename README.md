@@ -60,7 +60,7 @@ The FPP plugin dashboard replaces the default network configuration page and pro
 
 ### BT Speaker Delay Calibration (calibrate.html)
 
-For Bluetooth speakers connected to the Pi, audio arrives with a delay (typically 50-300ms). The calibration page helps measure and compensate for this:
+For Bluetooth speakers connected to devices that are streaming audio from the Pi, audio arrives with a delay (typically 50-300ms). The calibration page helps measure and compensate for this:
 
 1. **Test sequence generator** — select output channels and generate a `_bt_cal.fseq` that flashes lights every second
 2. **Calibration runner** — start the test sequence and adjust the delay slider (0-500ms) until Web Audio clicks are in sync with the light flashes
