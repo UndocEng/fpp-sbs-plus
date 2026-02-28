@@ -469,3 +469,20 @@ After ~12-14 seconds (settle + calibration), the phone stays locked to FPP's pos
 - **BT device management**: `admin.php` provides scan, pair, connect, disconnect, and volume control via `bluetoothctl` and `pactl`
 
 ---
+
+## Roadmap
+
+### USB Bluetooth Audio Output (Planned)
+
+SBS+ already includes BT delay calibration and device management for listeners who connect their phone or PC to a Bluetooth speaker — the calibration page measures the encoding latency and stores a per-profile delay so the PLL can compensate. However, this still relies on the listener's device as the audio source.
+
+The next step is native USB Bluetooth audio output from the Pi itself, allowing FPP to send show audio directly to a BT speaker without a phone relay. This would be a standalone FPP enhancement that works alongside SBS+:
+
+- **BT pairing UI** — scan, pair, trust, and connect Bluetooth speakers from a web page
+- **ALSA bridge** — use BlueALSA to present the paired BT speaker as a standard ALSA sound card that FPP can select as its audio output device
+- **Playback delay compensation** — a configurable BT audio delay setting so FPP can start the FSEQ sequence ahead of the audio, keeping lights and sound in sync despite A2DP encoding latency (typically 100-300ms)
+- **Auto-reconnect** — handle BT connection drops gracefully and reconnect without stopping the show
+
+This feature is independent of the SBS+ plugin and could be contributed upstream to the FPP project.
+
+---
