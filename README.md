@@ -474,7 +474,7 @@ After ~12-14 seconds (settle + calibration), the phone stays locked to FPP's pos
 
 ### USB Bluetooth Audio Output (Planned)
 
-SBS+ already includes BT delay calibration and device management for listeners who connect their phone or PC to a Bluetooth speaker — the calibration page measures the encoding latency and stores a per-profile delay so the PLL can compensate. However, this still relies on the listener's device as the audio source.
+For Bluetooth speakers connected to the Pi, audio arrives with a delay (typically 50-300ms). The calibration page helps measure and compensate for this: it plays synchronized click + flash patterns so you can dial in the exact offset for your speaker, then saves it as a named profile. The PLL subtracts this delay so lights and audio stay in sync.
 
 The next step is native USB Bluetooth audio output from the Pi itself, allowing FPP to send show audio directly to a BT speaker without a phone relay. This would be a standalone FPP enhancement that works alongside SBS+:
 
