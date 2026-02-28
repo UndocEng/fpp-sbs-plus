@@ -166,11 +166,21 @@ auth_algs=1
 $(echo -e "$WPA_BLOCK")
 ignore_broadcast_ssid=0
 ap_isolate=$AP_ISOLATE
+disassoc_low_ack=0
+ap_max_inactivity=3600
+skip_inactivity_poll=1
 HOSTAPD_EOF
         sudo chmod 644 "$HOSTAPD_FILE"
     else
         # Ensure interface line matches
         sudo sed -i "s/^interface=.*/interface=$IFACE/" "$HOSTAPD_FILE"
+        # Ensure ESP-friendly settings are present (prevents deauth of WLED devices)
+        for SETTING in "disassoc_low_ack=0" "ap_max_inactivity=3600" "skip_inactivity_poll=1"; do
+            KEY="${SETTING%%=*}"
+            if ! grep -q "^${KEY}=" "$HOSTAPD_FILE" 2>/dev/null; then
+                echo "$SETTING" | sudo tee -a "$HOSTAPD_FILE" > /dev/null
+            fi
+        done
     fi
 
     # --- dnsmasq config ---
